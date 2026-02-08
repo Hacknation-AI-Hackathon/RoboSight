@@ -35,9 +35,6 @@ Thumbs.db
 
 # Project
 jobs/
-*.mp4
-*.avi
-*.mov
 
 # Modal
 .modal/
@@ -45,3 +42,14 @@ jobs/
 # Jupyter
 .ipynb_checkpoints/
 RoboSight\frontend\node_module
+backend/backend_venv/Lib/site-packages/cv2/opencv_videoio_ffmpeg4130_64.dll
+backend/backend_venv/Lib/site-packages/numpy.libs/libscipy_openblas64_-74a408729250596b0973e69fdd954eea.dll
+backend/backend_venv/Lib/site-packages/numpy.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll
+backend/backend_venv/Scripts/python.exe
+.gitignore
+backend/backend_venv/Scripts/uvicorn.exe
+frontend/node_modules/@esbuild/win32-x64/esbuild.exe
+frontend/node_modules/@rollup/rollup-win32-x64-msvc/rollup.win32-x64-msvc.node
+
+frontend/node_modules/
+*/node_modules/
