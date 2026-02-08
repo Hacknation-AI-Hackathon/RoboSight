@@ -294,6 +294,38 @@
   margin-bottom: 10px;
 }
 
+.drop-zone__prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.drop-zone__prompts-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.drop-zone__prompts-input {
+  padding: 8px 12px;
+  font-size: 13px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  color: rgba(0, 0, 0, 0.9);
+}
+
+.drop-zone__prompts-input::placeholder {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.drop-zone__prompts-input:focus {
+  outline: none;
+  border-color: rgba(0, 122, 255, 0.5);
+}
+
 .drop-zone__text {
   font-size: 14px;
   font-weight: 500;
@@ -476,8 +508,10 @@
   mask-repeat: no-repeat;
 }
 
-/* Video: reduced size, centered in mask */
+/* Video: behind gradient so gradient overlays the screen; reduced size, centered in mask */
 .playback-view__video {
+  position: relative;
+  z-index: 0;
   width: 100%;
   height: 100%;
   max-width: 1691px;
@@ -510,11 +544,11 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* Visor gradient: bright white center fading to dark gray/black edges, like looking through a lens */
+/* Visor gradient: on top of video so it overlays the screen */
 .playback-view__gradient {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   pointer-events: none;
   background: radial-gradient(
     ellipse 70% 65% at 50% 48%,
@@ -629,57 +663,25 @@
   margin: 0;
 }
 
-/* Result view: full-screen backend video with floating original on the right */
+/* Result view: annotated video inside Vision Pro headset */
 .result-view {
   position: fixed;
   inset: 0;
   z-index: 16;
   background: #000;
   display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-}
-
-.result-view__main-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.result-view__floating-original {
-  position: absolute;
-  top: 50%;
-  right: 24px;
-  transform: translateY(-50%);
-  width: min(280px, 28vw);
-  aspect-ratio: 16 / 10;
-  background: rgba(0, 0, 0, 0.75);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  padding: 10px;
-  display: flex;
   flex-direction: column;
-  gap: 6px;
-  z-index: 10;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
 }
 
-.result-view__floating-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.result-view__floating-video {
-  flex: 1;
+.result-view--in-headset .playback-view__headset {
   width: 100%;
-  min-height: 0;
-  border-radius: 8px;
-  object-fit: cover;
+  max-width: 1678px;
+  max-height: 896px;
+  aspect-ratio: 1678 / 896;
+  margin: 0 auto;
 }
 
 .result-view__back {

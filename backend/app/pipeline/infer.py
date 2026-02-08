@@ -12,6 +12,33 @@ Organized in three layers:
 """
 
 import math
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Label aliases: VL model often uses different names for the same objects
+# that SAM3 segments. Keys are VL labels, values are the canonical SAM3 label.
+_LABEL_ALIASES: dict[str, str] = {
+    "dresser": "drawer",
+    "cabinet": "drawer",
+    "cupboard": "drawer",
+    "chest": "drawer",
+    "knob": "handle",
+    "pull": "handle",
+    "door_handle": "handle",
+    "doorknob": "handle",
+    "lever": "handle",
+    "gate": "door",
+    "entrance": "door",
+    "doorway": "door",
+}
+
+
+def _normalize_label(label: str) -> str:
+    """Map VL label synonyms to canonical SAM3 labels."""
+    return _LABEL_ALIASES.get(label.lower(), label.lower())
+
+
 from app.models import (
     DetectionFrame,
     SegmentationFrame,
@@ -168,6 +195,9 @@ def extract_vl_signals(
 ) -> tuple[str, float]:
     """Extract VL state and confidence for a specific object from a semantic frame.
 
+    Applies label normalization so VL synonyms (e.g. "dresser") match
+    canonical SAM3 labels (e.g. "drawer").
+
     Args:
         semantic_frame: Raw semantic frame dict from VL model.
         object_label: The object label to look for (e.g. "drawer").
@@ -175,10 +205,11 @@ def extract_vl_signals(
     Returns:
         (state, confidence) tuple. Defaults to ("unknown", 0.0) if not found.
     """
+    target = _normalize_label(object_label)
     objects = semantic_frame.get("objects", [])
     for obj in objects:
         label = obj.get("label", "") if isinstance(obj, dict) else obj.label
-        if label == object_label:
+        if _normalize_label(label) == target:
             state = obj.get("state", "unknown") if isinstance(obj, dict) else obj.state
             conf = obj.get("confidence", 0.0) if isinstance(obj, dict) else obj.confidence
             return state, conf

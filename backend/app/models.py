@@ -60,7 +60,7 @@ class SemanticObject(BaseModel):
 
     label: str
     state: str
-    confidence: float
+    confidence: float = 0.0
 
 
 class SemanticFrame(BaseModel):

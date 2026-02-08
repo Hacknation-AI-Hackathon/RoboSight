@@ -22,10 +22,14 @@ Thread-based parallelism is correct because:
   - Local: GIL is released during CUDA operations
 """
 
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
+from app.models import DetectionFrame, SegmentationFrame, SemanticFrame
 from app.pipeline import detect, segment, semantics
+
+logger = logging.getLogger(__name__)
 
 
 def run_models_parallel(
@@ -128,6 +132,7 @@ def run_models_parallel(
     else:
         print("[Orchestrator] All models completed successfully")
 
+    _validate_outputs(results)
     return results
 
 
@@ -198,9 +203,45 @@ def run_models_sequential(
     if progress_callback:
         progress_callback("vl_done", 0.7)
 
-    return {
+    results = {
         "detections": detections,
         "segmentations": segmentations,
         "semantics": sem,
         "errors": errors,
     }
+    _validate_outputs(results)
+    return results
+
+
+def _validate_outputs(results: dict[str, Any]) -> None:
+    """Validate model outputs against Pydantic contracts. Logs warnings only."""
+    _model_map = {
+        "detections": DetectionFrame,
+        "segmentations": SegmentationFrame,
+        "semantics": SemanticFrame,
+    }
+
+    for key, model_cls in _model_map.items():
+        entries = results.get(key, [])
+        if not entries:
+            logger.warning("[Orchestrator] %s is empty — pipeline will degrade", key)
+            continue
+
+        bad = 0
+        for i, entry in enumerate(entries):
+            try:
+                model_cls.model_validate(entry)
+            except Exception as e:
+                bad += 1
+                if bad <= 3:
+                    logger.warning(
+                        "[Orchestrator] %s[%d] validation issue: %s", key, i, e
+                    )
+
+        if bad:
+            logger.warning(
+                "[Orchestrator] %s: %d/%d entries had validation issues",
+                key, bad, len(entries),
+            )
+        else:
+            logger.info("[Orchestrator] %s: all %d entries valid", key, len(entries))
