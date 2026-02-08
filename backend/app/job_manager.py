@@ -22,6 +22,8 @@ Directory layout per job:
 
 import json
 import shutil
+import tempfile
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +39,7 @@ class JobManager:
         self.settings = settings or Settings()
         self.jobs_dir = Path(self.settings.jobs_dir)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
+        self._status_lock = threading.Lock()
 
     def _job_dir(self, job_id: str) -> Path:
         return self.jobs_dir / job_id
@@ -52,8 +55,16 @@ class JobManager:
             return json.load(f)
 
     def _write_status(self, job_id: str, status: dict) -> None:
-        with open(self._status_path(job_id), "w") as f:
-            json.dump(status, f, indent=2)
+        path = self._status_path(job_id)
+        # Atomic write: write to temp file then rename to prevent corruption
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with open(fd, "w") as f:
+                json.dump(status, f, indent=2)
+            Path(tmp).replace(path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     # ------------------------------------------------------------------
     # Job creation
@@ -93,40 +104,44 @@ class JobManager:
         self, job_id: str, progress: float, stage: str = ""
     ) -> None:
         """Update job progress (0.0 to 1.0) and optionally the current stage."""
-        status = self._read_status(job_id)
-        status["progress"] = round(min(max(progress, 0.0), 1.0), 3)
-        status["status"] = "processing"
-        if stage:
-            status["stage"] = stage
-        status["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._write_status(job_id, status)
+        with self._status_lock:
+            status = self._read_status(job_id)
+            status["progress"] = round(min(max(progress, 0.0), 1.0), 3)
+            status["status"] = "processing"
+            if stage:
+                status["stage"] = stage
+            status["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._write_status(job_id, status)
 
     def mark_complete(self, job_id: str) -> None:
         """Mark a job as successfully completed."""
-        status = self._read_status(job_id)
-        status["status"] = "completed"
-        status["progress"] = 1.0
-        status["stage"] = "done"
-        status["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._write_status(job_id, status)
+        with self._status_lock:
+            status = self._read_status(job_id)
+            status["status"] = "completed"
+            status["progress"] = 1.0
+            status["stage"] = "done"
+            status["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._write_status(job_id, status)
 
     def mark_failed(self, job_id: str, error: str) -> None:
         """Mark a job as failed with an error message."""
-        status = self._read_status(job_id)
-        status["status"] = "failed"
-        status["error"] = error
-        status["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._write_status(job_id, status)
+        with self._status_lock:
+            status = self._read_status(job_id)
+            status["status"] = "failed"
+            status["error"] = error
+            status["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._write_status(job_id, status)
 
     def mark_rerunning(self, job_id: str) -> None:
         """Mark a job as rerunning after calibration."""
-        status = self._read_status(job_id)
-        status["status"] = "rerunning"
-        status["progress"] = 0.0
-        status["stage"] = "calibrated_rerun"
-        status["error"] = None
-        status["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._write_status(job_id, status)
+        with self._status_lock:
+            status = self._read_status(job_id)
+            status["status"] = "rerunning"
+            status["progress"] = 0.0
+            status["stage"] = "calibrated_rerun"
+            status["error"] = None
+            status["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._write_status(job_id, status)
 
     # ------------------------------------------------------------------
     # Artifact I/O

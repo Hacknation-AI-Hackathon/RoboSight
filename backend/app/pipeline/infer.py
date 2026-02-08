@@ -431,10 +431,11 @@ class ObjectStateMachine:
     def should_transition(self, signal: Signal) -> bool:
         """Determine if a state transition should occur based on fused signals.
 
-        Transition requires ALL of:
-          1. Motion score above threshold (object physically moved)
-          2. Proximity score above threshold (person is near)
-          3. VL model confirms a different state
+        Uses a tiered approach:
+          - Tier 1: VL confidently says state changed → transition
+          - Tier 2: Weighted score (motion + proximity + VL) exceeds threshold
+          - Proximity is a weighted signal, NOT a hard gate, because
+            center-to-center distance is unreliable at high resolutions.
 
         Args:
             signal: Computed signals for the current keyframe pair.
@@ -442,22 +443,18 @@ class ObjectStateMachine:
         Returns:
             True if transition evidence is sufficient.
         """
-        motion_ok = signal.motion_score >= self.settings.motion_threshold
-        proximity_ok = signal.proximity_score >= (
-            1.0 / (1.0 + self.settings.proximity_threshold / self.settings.proximity_norm_factor)
-        )
         vl_confirms = (
             signal.vl_state != "unknown"
             and signal.vl_state != self.current_state
             and signal.vl_confidence >= self.settings.low_confidence_threshold
         )
 
-        if not proximity_ok:
-            return False
-
-        if motion_ok and vl_confirms:
+        # Tier 1: VL model confidently reports a different state.
+        # This is the strongest signal — the model actually sees the change.
+        if vl_confirms:
             return True
 
+        # Tier 2: Weighted multi-signal fusion with dwell time.
         weighted_score = (
             signal.motion_score * self.settings.motion_weight
             + signal.proximity_score * self.settings.proximity_weight

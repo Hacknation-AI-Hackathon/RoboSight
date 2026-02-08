@@ -251,7 +251,7 @@ def test_inference_with_real_job_data():
     print(f"  Objects discovered: {[o.label for o in result['objects']]}")
     print(f"  Events detected: {len(result['events'])}")
     for evt in result["events"]:
-        print(f"    - {evt.action} on {evt.object_label} "
+        print(f"    - {evt.type} | obj={evt.object_id} "
               f"[{evt.start_time:.1f}s - {evt.end_time:.1f}s] "
               f"conf={evt.confidence:.2f}")
 
