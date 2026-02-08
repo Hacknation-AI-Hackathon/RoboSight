@@ -471,17 +471,57 @@ async def get_metrics(job_id: str, run: str = "baseline"):
 
 @app.get("/jobs/{job_id}/events")
 async def get_events(job_id: str):
-    """Return events and objects from world_gt.json for the review UI."""
+    """Return events, objects, and state_timeline from world_gt.json for the review UI and charts."""
     try:
         data = job_manager.load_artifact(job_id, "world_gt.json")
         return JSONResponse(content={
             "events": data.get("events", []),
             "objects": data.get("objects", []),
+            "state_timeline": data.get("state_timeline", []),
         })
     except FileNotFoundError:
         raise HTTPException(
             status_code=404,
             detail="Events not available yet or job not found",
+        )
+
+
+@app.get("/jobs/{job_id}/segmentations")
+async def get_segmentations(job_id: str):
+    """Return segmentations.json for chart 1 (Object Detection Confidence)."""
+    try:
+        data = job_manager.load_artifact(job_id, "segmentations.json")
+        return JSONResponse(content=data if isinstance(data, list) else data.get("segmentations", []))
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Segmentations not available yet or job not found",
+        )
+
+
+@app.get("/jobs/{job_id}/detections")
+async def get_detections(job_id: str):
+    """Return detections.json for chart 2 (Person Tracking)."""
+    try:
+        data = job_manager.load_artifact(job_id, "detections.json")
+        return JSONResponse(content=data if isinstance(data, list) else data.get("detections", []))
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Detections not available yet or job not found",
+        )
+
+
+@app.get("/jobs/{job_id}/semantics")
+async def get_semantics(job_id: str):
+    """Return semantics.json for chart 5 (VL Model Consistency)."""
+    try:
+        data = job_manager.load_artifact(job_id, "semantics.json")
+        return JSONResponse(content=data if isinstance(data, list) else data.get("semantics", []))
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Semantics not available yet or job not found",
         )
 
 
