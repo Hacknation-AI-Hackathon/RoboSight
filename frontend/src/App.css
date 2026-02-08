@@ -1,0 +1,441 @@
+/* Container: fills viewport, keeps design proportions */
+.page {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100dvh;
+  position: relative;
+  background: #F5F5F7;
+  overflow: hidden;
+}
+
+/* Vision Pro wrapper – positions video + Apple Intelligence orb */
+.vision-pro-wrapper {
+  position: absolute;
+  width: 80.833%;
+  height: 80.833%;
+  left: 9.583%;
+  top: 9.537%;
+  pointer-events: none;
+}
+
+/* Image: same proportional size and position as 1552×873 at (184,103) in 1920×1080
+   width: 1552/1920 ≈ 80.83%, height: 873/1080 ≈ 80.83%
+   left: 184/1920 ≈ 9.58%, top: 103/1080 ≈ 9.54% */
+.vision-pro-wrapper .vision-pro-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* Apple Intelligence–style orb: orbiting particles around Vision Pro while processing */
+.apple-intelligence-orb {
+  position: absolute;
+  inset: -6%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.apple-intelligence-orb__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.apple-intelligence-orb__ring--1 { border-color: rgba(0, 122, 255, 0.45); }   /* Apple blue */
+.apple-intelligence-orb__ring--2 { border-color: rgba(175, 82, 222, 0.35); }  /* Apple purple */
+.apple-intelligence-orb__ring--3 { border-color: rgba(255, 45, 85, 0.3); }    /* Apple pink/red */
+
+.vision-pro-wrapper--processing .apple-intelligence-orb__ring {
+  opacity: 1;
+}
+
+.apple-intelligence-orb__ring--1 {
+  animation: apple-intel-pulse 2.5s ease-in-out infinite;
+}
+
+.apple-intelligence-orb__ring--2 {
+  inset: -4%;
+  animation: apple-intel-pulse 2.5s ease-in-out 0.4s infinite;
+}
+
+.apple-intelligence-orb__ring--3 {
+  inset: -8%;
+  animation: apple-intel-pulse 2.5s ease-in-out 0.8s infinite;
+}
+
+.apple-intelligence-orb__particles {
+  position: absolute;
+  inset: 0;
+}
+
+.apple-intelligence-orb__dot-wrap {
+  position: absolute;
+  inset: 0;
+  --angle: calc(var(--i, 0) * 30deg);
+  transform: rotate(var(--angle));
+  animation: apple-intel-orbit 5s linear infinite;
+  animation-play-state: paused;
+  animation-delay: calc(var(--i, 0) * -0.15s);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.vision-pro-wrapper--processing .apple-intelligence-orb__dot-wrap {
+  animation-play-state: running;
+  opacity: 1;
+}
+
+.apple-intelligence-orb__dot {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  margin-top: -3px;
+  border-radius: 50%;
+  /* Apple Intelligence spectrum: blue → purple → pink → cyan (--i from dot-wrap) */
+  background: hsl(calc(200 + var(--i, 0) * 12), 80%, 58%);
+  box-shadow: 0 0 12px hsl(calc(200 + var(--i, 0) * 12), 80%, 62%);
+  transform: scale(0);
+  transition: transform 0.4s ease;
+}
+
+.vision-pro-wrapper--processing .apple-intelligence-orb__dot {
+  transform: scale(1);
+}
+
+@keyframes apple-intel-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.98); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
+
+@keyframes apple-intel-orbit {
+  to { transform: rotate(calc(var(--angle) + 360deg)); }
+}
+
+.vision-pro-video {
+  display: block;
+  pointer-events: none; /* let drag events pass through to page */
+}
+
+/* Drag & drop zone: centered below Apple Vision Pro, glassmorphism, on-screen */
+.drop-zone {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* Just below Vision Pro image, visible in viewport (image bottom ≈ 90.37%) */
+  top: 82%;
+  width: 42%;
+  min-width: 280px;
+  max-width: 420px;
+  z-index: 2;
+  cursor: pointer;
+  border-radius: 16px;
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.drop-zone:hover {
+  transform: translateX(-50%) scale(1.01);
+}
+
+.drop-zone--active {
+  transform: translateX(-50%) scale(1.02);
+}
+
+.drop-zone--active .drop-zone__glass {
+  background: rgba(255, 255, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.drop-zone__glass {
+  padding: 18px 24px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.drop-zone--has-files {
+  max-width: min(90vw, 600px);
+}
+
+.drop-zone--has-files .drop-zone__glass {
+  padding: 16px 24px 20px;
+  min-width: 320px;
+  width: 100%;
+}
+
+/* Processing bar - above drag & drop label, does not affect layout */
+.processing-bar {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  pointer-events: none;
+}
+
+.processing-bar__track {
+  width: 100%;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.processing-bar__fill {
+  height: 100%;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+  transition: width 0.25s ease-out;
+}
+
+.processing-bar__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.02em;
+}
+
+.drop-zone__label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.01em;
+  margin-bottom: 10px;
+}
+
+.drop-zone__text {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.01em;
+}
+
+/* Uploaded files list - horizontal, side by side */
+.uploaded-files {
+  width: 100%;
+  display: flex;
+  flex-wrap: nowrap;
+  flex-direction: row;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.uploaded-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  min-width: 180px;
+  max-width: 220px;
+  flex-shrink: 0;
+}
+
+.uploaded-file__preview {
+  width: 56px;
+  height: 40px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+.uploaded-file__preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.uploaded-file__placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.uploaded-file__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.uploaded-file__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uploaded-file__size {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.uploaded-file__delete {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+
+.uploaded-file__delete:hover {
+  background: rgba(255, 59, 48, 0.2);
+  color: rgb(255, 59, 48);
+}
+
+/* Playback view: black bg, Vision Pro frame, video in display area */
+.playback-view {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.playback-view__headset {
+  position: relative;
+  width: 100%;
+  max-width: 1678px;
+  max-height: 896px;
+  aspect-ratio: 1678 / 896;
+  margin: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* back-vision pro.png: 1678×896, responsive and centered */
+.playback-view__headset-img {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  max-width: 1678px;
+  max-height: 896px;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  pointer-events: none;
+}
+
+/* Back-inside mask: clips video to lens shape; inset 2px to hide white line, up 1px */
+.playback-view__screen {
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  z-index: 1;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  -webkit-mask-image: url("/back-inside-mask.png");
+  mask-image: url("/back-inside-mask.png");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* Video: reduced size, centered in mask */
+.playback-view__video {
+  width: 100%;
+  height: 100%;
+  max-width: 1691px;
+  max-height: 902px;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  transform: scale(0.76);
+}
+
+/* Visor gradient: bright white center fading to dark gray/black edges, like looking through a lens */
+.playback-view__gradient {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 70% 65% at 50% 48%,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.02) 18%,
+    rgba(255, 255, 255, 0) 30%,
+    rgba(80, 80, 90, 0.45) 55%,
+    rgba(30, 30, 40, 0.7) 78%,
+    rgba(0, 0, 0, 0.95) 100%
+  );
+  -webkit-mask-image: url("/back-inside-mask.png");
+  mask-image: url("/back-inside-mask.png");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+
