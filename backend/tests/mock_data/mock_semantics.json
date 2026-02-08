@@ -1,0 +1,57 @@
+[
+  {
+    "frame_index": 0,
+    "timestamp": 0.0,
+    "objects": [
+      {"label": "drawer", "state": "closed", "confidence": 0.92},
+      {"label": "handle", "state": "visible", "confidence": 0.85}
+    ],
+    "action": "no_action",
+    "description": "Person standing at a distance from a closed drawer",
+    "raw_response": "{\"objects\":[{\"label\":\"drawer\",\"state\":\"closed\",\"confidence\":0.92},{\"label\":\"handle\",\"state\":\"visible\",\"confidence\":0.85}],\"action\":\"no_action\",\"description\":\"Person standing at a distance from a closed drawer\"}"
+  },
+  {
+    "frame_index": 10,
+    "timestamp": 2.0,
+    "objects": [
+      {"label": "drawer", "state": "closed", "confidence": 0.88},
+      {"label": "handle", "state": "visible", "confidence": 0.84}
+    ],
+    "action": "person_approaching_drawer",
+    "description": "Person reaching toward the drawer handle",
+    "raw_response": "{\"objects\":[{\"label\":\"drawer\",\"state\":\"closed\",\"confidence\":0.88},{\"label\":\"handle\",\"state\":\"visible\",\"confidence\":0.84}],\"action\":\"person_approaching_drawer\",\"description\":\"Person reaching toward the drawer handle\"}"
+  },
+  {
+    "frame_index": 20,
+    "timestamp": 4.0,
+    "objects": [
+      {"label": "drawer", "state": "open", "confidence": 0.91},
+      {"label": "handle", "state": "grasped", "confidence": 0.78}
+    ],
+    "action": "person_opening_drawer",
+    "description": "Person has pulled the drawer open",
+    "raw_response": "{\"objects\":[{\"label\":\"drawer\",\"state\":\"open\",\"confidence\":0.91},{\"label\":\"handle\",\"state\":\"grasped\",\"confidence\":0.78}],\"action\":\"person_opening_drawer\",\"description\":\"Person has pulled the drawer open\"}"
+  },
+  {
+    "frame_index": 30,
+    "timestamp": 6.0,
+    "objects": [
+      {"label": "drawer", "state": "open", "confidence": 0.90},
+      {"label": "handle", "state": "visible", "confidence": 0.82}
+    ],
+    "action": "person_reaching_into_drawer",
+    "description": "Person interacting with contents of the open drawer",
+    "raw_response": "{\"objects\":[{\"label\":\"drawer\",\"state\":\"open\",\"confidence\":0.90},{\"label\":\"handle\",\"state\":\"visible\",\"confidence\":0.82}],\"action\":\"person_reaching_into_drawer\",\"description\":\"Person interacting with contents of the open drawer\"}"
+  },
+  {
+    "frame_index": 40,
+    "timestamp": 8.0,
+    "objects": [
+      {"label": "drawer", "state": "closed", "confidence": 0.93},
+      {"label": "handle", "state": "visible", "confidence": 0.86}
+    ],
+    "action": "person_closing_drawer",
+    "description": "Person has pushed the drawer closed",
+    "raw_response": "{\"objects\":[{\"label\":\"drawer\",\"state\":\"closed\",\"confidence\":0.93},{\"label\":\"handle\",\"state\":\"visible\",\"confidence\":0.86}],\"action\":\"person_closing_drawer\",\"description\":\"Person has pushed the drawer closed\"}"
+  }
+]

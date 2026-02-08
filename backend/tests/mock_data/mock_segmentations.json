@@ -1,0 +1,102 @@
+[
+  {
+    "frame_index": 0,
+    "timestamp": 0.0,
+    "objects": [
+      {
+        "label": "drawer",
+        "instance_id": 0,
+        "bbox": [500.0, 300.0, 700.0, 420.0],
+        "score": 0.91,
+        "mask_bbox_area": 24000.0
+      },
+      {
+        "label": "handle",
+        "instance_id": 0,
+        "bbox": [580.0, 340.0, 620.0, 370.0],
+        "score": 0.85,
+        "mask_bbox_area": 1200.0
+      }
+    ]
+  },
+  {
+    "frame_index": 10,
+    "timestamp": 2.0,
+    "objects": [
+      {
+        "label": "drawer",
+        "instance_id": 0,
+        "bbox": [500.0, 300.0, 700.0, 420.0],
+        "score": 0.92,
+        "mask_bbox_area": 24000.0
+      },
+      {
+        "label": "handle",
+        "instance_id": 0,
+        "bbox": [580.0, 340.0, 620.0, 370.0],
+        "score": 0.87,
+        "mask_bbox_area": 1200.0
+      }
+    ]
+  },
+  {
+    "frame_index": 20,
+    "timestamp": 4.0,
+    "objects": [
+      {
+        "label": "drawer",
+        "instance_id": 0,
+        "bbox": [500.0, 300.0, 780.0, 420.0],
+        "score": 0.89,
+        "mask_bbox_area": 33600.0
+      },
+      {
+        "label": "handle",
+        "instance_id": 0,
+        "bbox": [650.0, 340.0, 690.0, 370.0],
+        "score": 0.84,
+        "mask_bbox_area": 1200.0
+      }
+    ]
+  },
+  {
+    "frame_index": 30,
+    "timestamp": 6.0,
+    "objects": [
+      {
+        "label": "drawer",
+        "instance_id": 0,
+        "bbox": [500.0, 300.0, 780.0, 420.0],
+        "score": 0.90,
+        "mask_bbox_area": 33600.0
+      },
+      {
+        "label": "handle",
+        "instance_id": 0,
+        "bbox": [650.0, 340.0, 690.0, 370.0],
+        "score": 0.86,
+        "mask_bbox_area": 1200.0
+      }
+    ]
+  },
+  {
+    "frame_index": 40,
+    "timestamp": 8.0,
+    "objects": [
+      {
+        "label": "drawer",
+        "instance_id": 0,
+        "bbox": [500.0, 300.0, 705.0, 420.0],
+        "score": 0.93,
+        "mask_bbox_area": 24600.0
+      },
+      {
+        "label": "handle",
+        "instance_id": 0,
+        "bbox": [582.0, 340.0, 622.0, 370.0],
+        "score": 0.88,
+        "mask_bbox_area": 1200.0
+      }
+    ]
+  }
+]
