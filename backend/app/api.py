@@ -118,23 +118,12 @@ def _run_pipeline_sync(job_id: str, object_prompts: list[str]) -> None:
 
         job_manager.update_progress(job_id, 0.65, "running_inference")
 
-        # Scale proximity_norm_factor to video resolution so thresholds
-        # are resolution-independent. Default 500 was calibrated for 720p.
-        import math as _math
-        w, h = video_info["resolution"]
-        diagonal = _math.sqrt(w ** 2 + h ** 2)
-        reference_diagonal = 1280.0  # ~720p diagonal
-        scale = diagonal / reference_diagonal
-        scaled_settings = settings.apply_calibration({
-            "proximity_norm_factor": settings.proximity_norm_factor * scale,
-        })
-
         inference_result = infer.run_inference(
             detections=detections,
             segmentations=segmentations,
             semantics=semantics,
             video_duration=video_info["duration_seconds"],
-            settings=scaled_settings,
+            settings=settings,
         )
 
         job_manager.update_progress(job_id, 0.75, "compiling_outputs")
@@ -218,16 +207,6 @@ def _run_calibrated_rerun_sync(job_id: str) -> None:
 
         calibrated_settings = settings.apply_calibration(calibrated_params)
         job_manager.save_artifact(job_id, "calibration.json", calibrated_params)
-
-        # Scale proximity_norm_factor to video resolution
-        import math as _math
-        w, h = video_info["resolution"]
-        diagonal = _math.sqrt(w ** 2 + h ** 2)
-        reference_diagonal = 1280.0
-        scale = diagonal / reference_diagonal
-        calibrated_settings = calibrated_settings.apply_calibration({
-            "proximity_norm_factor": calibrated_settings.proximity_norm_factor * scale,
-        })
 
         job_manager.update_progress(job_id, 0.4, "rerunning_inference")
 
