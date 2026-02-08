@@ -393,22 +393,6 @@ async def get_confidence_report(job_id: str):
         )
 
 
-@app.get("/jobs/{job_id}/input-video")
-async def get_input_video(job_id: str):
-    """Stream the converted input video for frontend playback."""
-    try:
-        path = job_manager.get_input_video_path(job_id)
-        return FileResponse(
-            path=str(path),
-            media_type="video/mp4",
-            filename="input.mp4",
-        )
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=f"Input video not found for job {job_id}"
-        )
-
-
 @app.get("/jobs/{job_id}/annotated-video")
 async def get_annotated_video(job_id: str):
     """Stream the annotated video file."""
