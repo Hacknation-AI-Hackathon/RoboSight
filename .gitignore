@@ -42,3 +42,4 @@ jobs/
 
 # Jupyter
 .ipynb_checkpoints/
+RoboSight\frontend\node_module
