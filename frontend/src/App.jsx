@@ -51,9 +51,11 @@ export default function App() {
   const [playbackBlobUrl, setPlaybackBlobUrl] = useState(null)
   const [showResultView, setShowResultView] = useState(false)
   const [jobError, setJobError] = useState(null)
+  const [annotatedVideoBlobUrl, setAnnotatedVideoBlobUrl] = useState(null)
   const videoRef = useRef(null)
   const playbackVideoRef = useRef(null)
   const playbackBlobUrlRef = useRef(null)
+  const annotatedBlobUrlRef = useRef(null)
   const transitionVideoRef = useRef(null)
   const dropZoneRef = useRef(null)
   const hasSeenTransitionVideoRef = useRef(false)
@@ -63,9 +65,31 @@ export default function App() {
   const postProcessingTimerRef = useRef(null)
   const reverseRafRef = useRef(null)
   const statusPollIntervalRef = useRef(null)
+  const resultVideoRef = useRef(null)
 
   const hadFilesRef = useRef(0)
   hadFilesRef.current = droppedFiles.length
+
+  // Open existing job from URL (?job=id): show annotated video in Google Meet layout if job is completed
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const jobFromUrl = params.get('job')
+    if (!jobFromUrl || jobId) return
+    let cancelled = false
+    fetch(`${API_BASE}/jobs/${jobFromUrl}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return
+        if (data.status === 'completed') {
+          setJobId(data.job_id || jobFromUrl)
+          setJobStatus(data)
+          setShowPlaybackView(true)
+          setShowResultView(true)
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const playReverseToStart = useCallback(() => {
     const video = videoRef.current
@@ -396,9 +420,14 @@ export default function App() {
     setJobStatus(null)
     setInputVideoUrl(null)
     setJobError(null)
+    setAnnotatedVideoBlobUrl(null)
     if (playbackBlobUrlRef.current) {
       URL.revokeObjectURL(playbackBlobUrlRef.current)
       playbackBlobUrlRef.current = null
+    }
+    if (annotatedBlobUrlRef.current) {
+      URL.revokeObjectURL(annotatedBlobUrlRef.current)
+      annotatedBlobUrlRef.current = null
     }
     setPlaybackBlobUrl(null)
     setDroppedFiles((prev) => {
@@ -409,6 +438,45 @@ export default function App() {
   }, [])
 
   const resultVideoUrl = jobId ? `${API_BASE}/jobs/${jobId}/annotated-video` : null
+
+  // As soon as result view is shown, fetch annotated video as blob so we can show it (and for Vision Pro compatibility)
+  useEffect(() => {
+    if (!showResultView || !resultVideoUrl) {
+      if (annotatedBlobUrlRef.current) {
+        URL.revokeObjectURL(annotatedBlobUrlRef.current)
+        annotatedBlobUrlRef.current = null
+      }
+      setAnnotatedVideoBlobUrl(null)
+      return
+    }
+    let cancelled = false
+    fetch(resultVideoUrl)
+      .then((r) => {
+        if (!r.ok) throw new Error(r.statusText)
+        return r.blob()
+      })
+      .then((blob) => {
+        if (cancelled) return
+        if (annotatedBlobUrlRef.current) URL.revokeObjectURL(annotatedBlobUrlRef.current)
+        const url = URL.createObjectURL(blob)
+        annotatedBlobUrlRef.current = url
+        setAnnotatedVideoBlobUrl(url)
+      })
+      .catch(() => {
+        if (!cancelled) setAnnotatedVideoBlobUrl(null)
+      })
+    return () => {
+      cancelled = true
+      if (annotatedBlobUrlRef.current) {
+        URL.revokeObjectURL(annotatedBlobUrlRef.current)
+        annotatedBlobUrlRef.current = null
+      }
+      setAnnotatedVideoBlobUrl(null)
+    }
+  }, [showResultView, resultVideoUrl])
+
+  // Main video must always use annotated-video URL so it never shows input (no blob mix-up)
+  const mainVideoSrc = resultVideoUrl || null
 
   return (
     <div
@@ -432,30 +500,67 @@ export default function App() {
             playsInline
             autoPlay
             preload="auto"
+            disablePictureInPicture
+            disableRemotePlayback
             onEnded={handleTransitionVideoEnded}
           />
         </div>
       )}
-      {/* Result view: annotated video inside Vision Pro headset only (no button) */}
+      {/* Result view: Google Meet layout — annotated video from backend job as main stage, original as PiP */}
       {showResultView && resultVideoUrl && (
-        <div className="result-view result-view--in-headset">
-          <div className="playback-view__headset">
-            <div className="playback-view__screen">
+        <div className="result-view result-view--meet">
+          {/* Main stage: annotated video from /jobs/:id/annotated-video (Meet “main speaker”) */}
+          <div className="result-view__main">
+            {mainVideoSrc ? (
               <video
-                key={`result-${jobId}`}
-                className="playback-view__video"
-                src={resultVideoUrl}
+                ref={resultVideoRef}
+                key={`annotated-${jobId}`}
+                className="result-view__main-video"
+                src={mainVideoSrc}
                 muted
                 playsInline
                 autoPlay
                 loop
                 preload="auto"
+                disablePictureInPicture
+                disableRemotePlayback
                 onLoadedData={(e) => e.target.play().catch(() => {})}
                 onCanPlay={(e) => e.target.play().catch(() => {})}
+              onError={(e) => console.warn('[RoboSight] Annotated video failed to load', e.target?.error)}
               />
-              <div className="playback-view__gradient" aria-hidden="true" />
+            ) : (
+              <div className="result-view__loading">
+                <span className="playback-view__error-text">Loading annotated video…</span>
+              </div>
+            )}
+            <div className="result-view__main-label">Annotated view</div>
+          </div>
+          {/* PiP: original input video (bottom-right like Google Meet) */}
+          {effectivePlaybackSrc && (
+            <div className="result-view__pip" aria-label="Original video">
+              <video
+                className="result-view__pip-video"
+                src={effectivePlaybackSrc}
+                data-video-role="original"
+                muted
+                playsInline
+                autoPlay
+                loop
+                preload="auto"
+                disablePictureInPicture
+                disableRemotePlayback
+                onLoadedData={(e) => e.target.play().catch(() => {})}
+              />
+              <span className="result-view__pip-label">Original</span>
             </div>
-            <img src="/back-vision%20pro.png" alt="" className="playback-view__headset-img" />
+          )}
+          {/* Top-left: Leave call (Meet style) */}
+          <button type="button" className="result-view__back" onClick={handleBackFromResult}>
+            Leave
+          </button>
+          {/* Bottom bar: Meet-style control strip */}
+          <div className="result-view__bar">
+            <span className="result-view__bar-title">RoboSight — Annotated result</span>
           </div>
         </div>
       )}
@@ -470,6 +575,26 @@ export default function App() {
           )}
           <div className="playback-view__headset">
             <div className="playback-view__screen">
+              {/* AI / game scanner style overlay when input video is playing (Satisfactory-like) */}
+              {effectivePlaybackSrc && !playbackEntry?.error && (
+                <div className="playback-view__scanner" aria-hidden="true">
+                  <div className="playback-view__scanner__grid" />
+                  <div className="playback-view__scanner__line playback-view__scanner__line--1" />
+                  <div className="playback-view__scanner__line playback-view__scanner__line--2" />
+                  <div className="playback-view__scanner__line playback-view__scanner__line--3" />
+                  <div className="playback-view__scanner__corner playback-view__scanner__corner--tl" />
+                  <div className="playback-view__scanner__corner playback-view__scanner__corner--tr" />
+                  <div className="playback-view__scanner__corner playback-view__scanner__corner--bl" />
+                  <div className="playback-view__scanner__corner playback-view__scanner__corner--br" />
+                  <div className="playback-view__scanner__particles">
+                    {[...Array(8)].map((_, i) => (
+                      <div key={i} className="playback-view__scanner__dot-wrap" style={{ '--i': i }}>
+                        <span className="playback-view__scanner__dot" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {playbackEntry?.error ? (
                 <div className="playback-view__error">
                   <span className="playback-view__error-text">{playbackEntry.error}</span>
@@ -486,6 +611,8 @@ export default function App() {
                   autoPlay
                   loop
                   preload="auto"
+                  disablePictureInPicture
+                  disableRemotePlayback
                   onLoadedData={(e) => e.target.play().catch(() => {})}
                   onCanPlay={(e) => e.target.play().catch(() => {})}
                   onError={() => handlePlaybackVideoError(effectivePlaybackIndex)}

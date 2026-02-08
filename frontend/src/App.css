@@ -35,6 +35,15 @@
   contain: layout paint;
 }
 
+/* Block hover from reaching transition video so native controls overlay doesn't show */
+.transition-video-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: auto;
+}
+
 /* Playback view zoom-in transition (matches back-vision pro scale) */
 .playback-view--zoom-in {
   animation: playback-view-zoom-in 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
@@ -508,6 +517,148 @@
   mask-repeat: no-repeat;
 }
 
+/* AI / game scanner overlay inside Vision Pro screen (Satisfactory-style) */
+/* z-index 3 so it appears above the gradient overlay (z-index 2) */
+.playback-view__scanner {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  -webkit-mask-image: url("/back-inside-mask.png");
+  mask-image: url("/back-inside-mask.png");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* Grid overlay – scan lines like Satisfactory / scanner games */
+.playback-view__scanner__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 180, 216, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 180, 216, 0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: scanner-grid-pulse 3s ease-in-out infinite;
+}
+
+@keyframes scanner-grid-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* Sweeping scan lines – horizontal bars moving top to bottom */
+.playback-view__scanner__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 230, 250, 0.8),
+    rgba(0, 180, 216, 0.9),
+    rgba(0, 230, 250, 0.8),
+    transparent
+  );
+  box-shadow: 0 0 12px rgba(0, 230, 250, 0.6);
+  animation: scanner-line-sweep 2.5s linear infinite;
+}
+
+.playback-view__scanner__line--2 {
+  animation-delay: 0.83s;
+  opacity: 0.7;
+}
+
+.playback-view__scanner__line--3 {
+  animation-delay: 1.66s;
+  opacity: 0.5;
+}
+
+@keyframes scanner-line-sweep {
+  0% { top: 0; opacity: 0; }
+  5% { opacity: 1; }
+  95% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* Corner brackets – scanner frame aesthetic */
+.playback-view__scanner__corner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: rgba(0, 230, 250, 0.6);
+  border-style: solid;
+  border-width: 0;
+}
+
+.playback-view__scanner__corner--tl {
+  top: 12px;
+  left: 12px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+
+.playback-view__scanner__corner--tr {
+  top: 12px;
+  right: 12px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+}
+
+.playback-view__scanner__corner--bl {
+  bottom: 12px;
+  left: 12px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+}
+
+.playback-view__scanner__corner--br {
+  bottom: 12px;
+  right: 12px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+}
+
+/* Orbiting dots – loading / processing indicator */
+.playback-view__scanner__particles {
+  position: absolute;
+  inset: 0;
+}
+
+.playback-view__scanner__dot-wrap {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 45%;
+  height: 45%;
+  transform-origin: left top;
+  --angle: calc(var(--i, 0) * 45deg);
+  transform: rotate(var(--angle));
+  animation: scanner-orbit 6s linear infinite;
+  animation-delay: calc(var(--i, 0) * -0.15s);
+}
+
+.playback-view__scanner__dot {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 3px;
+  height: 3px;
+  margin-right: -1.5px;
+  margin-top: -1.5px;
+  border-radius: 50%;
+  background: rgba(0, 230, 250, 0.9);
+  box-shadow: 0 0 8px rgba(0, 230, 250, 0.8);
+}
+
+@keyframes scanner-orbit {
+  to { transform: rotate(calc(var(--angle) + 360deg)); }
+}
+
 /* Video: behind gradient so gradient overlays the screen; reduced size, centered in mask */
 .playback-view__video {
   position: relative;
@@ -520,6 +671,14 @@
   object-position: center;
   display: block;
   transform: scale(0.76);
+}
+
+/* Hide native hover controls (PiP, subtitles, etc.) on playback/result and transition videos */
+.playback-view__video::-webkit-media-controls,
+.playback-view__video::-webkit-media-controls-enclosure,
+.transition-video-layer__video::-webkit-media-controls,
+.transition-video-layer__video::-webkit-media-controls-enclosure {
+  display: none !important;
 }
 
 /* Unsupported codec / playback error in headset */
@@ -544,12 +703,12 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* Visor gradient: on top of video so it overlays the screen */
+/* Visor gradient: on top of video so it overlays the screen; capture pointer so native video hover controls (PiP, etc.) don't show */
 .playback-view__gradient {
   position: absolute;
   inset: 0;
   z-index: 2;
-  pointer-events: none;
+  pointer-events: auto;
   background: radial-gradient(
     ellipse 70% 65% at 50% 48%,
     rgba(255, 255, 255, 0.08) 0%,
@@ -663,38 +822,132 @@
   margin: 0;
 }
 
-/* Result view: annotated video inside Vision Pro headset */
+/* Result view: Google Meet layout — annotated video main stage, original PiP, bottom bar */
 .result-view {
   position: fixed;
   inset: 0;
   z-index: 16;
-  background: #000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 24px;
+  background: #202124;
 }
 
-.result-view--in-headset .playback-view__headset {
+/* Full-viewport main area (annotated video = main “speaker” like Meet) */
+.result-view--meet .result-view__main {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.result-view__main-video {
   width: 100%;
-  max-width: 1678px;
-  max-height: 896px;
-  aspect-ratio: 1678 / 896;
-  margin: 0 auto;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+}
+
+.result-view__main-video::-webkit-media-controls,
+.result-view__main-video::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+
+/* Label on main video (bottom-left, Meet style) */
+.result-view__main-label {
+  position: absolute;
+  left: 20px;
+  bottom: 72px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.result-view__loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.result-view__loading .playback-view__error-text {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Picture-in-picture: original input (bottom-right like Google Meet) */
+.result-view__pip {
+  position: absolute;
+  right: 16px;
+  bottom: 72px;
+  width: min(26%, 240px);
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  z-index: 5;
+  background: #000;
+}
+
+.result-view__pip-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.result-view__pip-video::-webkit-media-controls,
+.result-view__pip-video::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+
+/* Back button: top-left (like “Leave call” in Meet) */
+.result-view__pip-label {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.result-view__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56px;
+  background: rgba(32, 33, 36, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.result-view__bar-title {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .result-view__back {
   position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 20px;
+  left: 20px;
   padding: 10px 24px;
   font-size: 14px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 10px;
   cursor: pointer;
   z-index: 10;
@@ -702,8 +955,8 @@
 }
 
 .result-view__back:hover {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 
