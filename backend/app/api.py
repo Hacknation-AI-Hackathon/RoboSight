@@ -295,11 +295,20 @@ async def create_job(
     file: UploadFile = File(...),
     object_prompts: str = Form(default=""),
 ):
-    """Upload a video and start the ground truth generation pipeline."""
+    """Upload a video and start the ground truth generation pipeline.
+
+    Returns the job_id and a URL to the converted mp4 immediately
+    so the frontend can play the video while processing runs.
+    """
     job_id = job_manager.create_job()
 
     video_bytes = await file.read()
-    job_manager.save_input_video(job_id, video_bytes)
+    job_manager.save_input_video(job_id, video_bytes, file.filename or "input.mp4")
+
+    from app.pipeline.convert import ensure_mp4
+
+    raw_path = str(job_manager.get_input_video_path(job_id))
+    video_path = await asyncio.to_thread(ensure_mp4, raw_path)
 
     prompts = []
     if object_prompts:
@@ -309,7 +318,27 @@ async def create_job(
         asyncio.to_thread(_run_pipeline_sync, job_id, prompts)
     )
 
-    return {"job_id": job_id, "status": "processing"}
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "input_video_url": f"/jobs/{job_id}/input-video",
+    }
+
+
+@app.get("/jobs/{job_id}/input-video")
+async def get_input_video(job_id: str):
+    """Serve the converted mp4 input video for frontend playback."""
+    try:
+        path = job_manager.get_input_video_path(job_id)
+        return FileResponse(
+            path=str(path),
+            media_type="video/mp4",
+            filename="input.mp4",
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"Input video not found for job {job_id}"
+        )
 
 
 @app.get("/jobs/{job_id}")
@@ -361,6 +390,22 @@ async def get_confidence_report(job_id: str):
         raise HTTPException(
             status_code=404,
             detail="Confidence report not available yet or job not found",
+        )
+
+
+@app.get("/jobs/{job_id}/input-video")
+async def get_input_video(job_id: str):
+    """Stream the converted input video for frontend playback."""
+    try:
+        path = job_manager.get_input_video_path(job_id)
+        return FileResponse(
+            path=str(path),
+            media_type="video/mp4",
+            filename="input.mp4",
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"Input video not found for job {job_id}"
         )
 
 
