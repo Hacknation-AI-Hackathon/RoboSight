@@ -262,6 +262,24 @@ class JobStatus(BaseModel):
     error: str | None = None
 
 
+class ReviewAction(str, Enum):
+    """Actions for the simple 3-button review flow."""
+
+    APPROVE = "approve"
+    CORRECT = "correct"
+    REJECT = "reject"
+
+
+class ReviewPayload(BaseModel):
+    """Payload for the review endpoint."""
+
+    action: ReviewAction
+    rejected_events: list[str] = Field(
+        default_factory=list,
+        description="Event IDs the user marked as wrong (only used for 'correct' action)",
+    )
+
+
 class CorrectionAction(str, Enum):
     """Allowed correction actions from the frontend."""
 

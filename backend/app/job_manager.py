@@ -132,6 +132,22 @@ class JobManager:
             status["updated_at"] = datetime.now(timezone.utc).isoformat()
             self._write_status(job_id, status)
 
+    def mark_approved(self, job_id: str) -> None:
+        """Mark a job as approved by the reviewer."""
+        with self._status_lock:
+            status = self._read_status(job_id)
+            status["status"] = "approved"
+            status["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._write_status(job_id, status)
+
+    def mark_rejected(self, job_id: str) -> None:
+        """Mark a job as rejected by the reviewer."""
+        with self._status_lock:
+            status = self._read_status(job_id)
+            status["status"] = "rejected"
+            status["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._write_status(job_id, status)
+
     def mark_rerunning(self, job_id: str) -> None:
         """Mark a job as rerunning after calibration."""
         with self._status_lock:

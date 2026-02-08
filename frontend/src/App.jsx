@@ -118,7 +118,7 @@ export default function App() {
           setJobId(data.job_id || jobFromUrl)
           setJobStatus(data)
           setShowPlaybackView(true)
-          setShowResultView(true)
+          // Don't setShowResultView here — the blob-fetch useEffect will do it once the annotated video is fully downloaded
         }
       })
       .catch(() => {})
@@ -422,7 +422,7 @@ export default function App() {
             clearInterval(statusPollIntervalRef.current)
             statusPollIntervalRef.current = null
           }
-          setShowResultView(true)
+          // Don't setShowResultView here — the blob-fetch useEffect will do it once the annotated video is fully downloaded
         } else if (data.status === 'failed') {
           if (statusPollIntervalRef.current) {
             clearInterval(statusPollIntervalRef.current)
@@ -487,13 +487,15 @@ export default function App() {
       return []
     })
     hasSeenTransitionVideoRef.current = false
+    setResultVideoPlaying(true)
   }, [])
 
   const resultVideoUrl = jobId ? `${API_BASE}/jobs/${jobId}/annotated-video` : null
 
-  // As soon as result view is shown, fetch annotated video as blob so we can show it (and for Vision Pro compatibility)
+  // When job completes, fetch annotated video as a full blob BEFORE showing result view
+  const isJobCompleted = jobStatus?.status === 'completed'
   useEffect(() => {
-    if (!showResultView || !resultVideoUrl) {
+    if (!isJobCompleted || !resultVideoUrl) {
       if (annotatedBlobUrlRef.current) {
         URL.revokeObjectURL(annotatedBlobUrlRef.current)
         annotatedBlobUrlRef.current = null
@@ -513,6 +515,7 @@ export default function App() {
         const url = URL.createObjectURL(blob)
         annotatedBlobUrlRef.current = url
         setAnnotatedVideoBlobUrl(url)
+        setShowResultView(true) // Only show result view once blob is fully downloaded
       })
       .catch(() => {
         if (!cancelled) setAnnotatedVideoBlobUrl(null)
@@ -525,7 +528,7 @@ export default function App() {
       }
       setAnnotatedVideoBlobUrl(null)
     }
-  }, [showResultView, resultVideoUrl])
+  }, [isJobCompleted, resultVideoUrl])
 
   // Default PiP position (bottom-right) when entering result view
   useEffect(() => {
@@ -688,8 +691,8 @@ export default function App() {
     return handleOnLeft ? (handleOnTop ? 'tl' : 'bl') : (handleOnTop ? 'tr' : 'br')
   })()
 
-  // Main video must always use annotated-video URL so it never shows input (no blob mix-up)
-  const mainVideoSrc = resultVideoUrl || null
+  // Main video uses only the fully-downloaded blob URL (never the raw streaming URL)
+  const mainVideoSrc = annotatedVideoBlobUrl || null
 
   const handleResultAction = useCallback(
     async (action) => {
@@ -863,7 +866,7 @@ export default function App() {
                 <pre className="reports-page__json-pre">
                   {(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab]) != null
                     ? JSON.stringify(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab], null, 2)
-                    : '—'}
+                    : '\u2014'}
                 </pre>
               </div>
             </aside>
@@ -1021,7 +1024,7 @@ export default function App() {
                     <div className="reports-page__video-info">
                       <p>Duration: {(reportData.worldGt.video.duration_seconds ?? 0).toFixed(1)}s</p>
                       <p>FPS: {(reportData.worldGt.video.fps ?? 0).toFixed(1)}</p>
-                      <p>Resolution: {reportData.worldGt.video.resolution?.join(' × ') || '—'}</p>
+                      <p>Resolution: {reportData.worldGt.video.resolution?.join(' \u00d7 ') || '\u2014'}</p>
                     </div>
                   </div>
                 )}
@@ -1066,10 +1069,10 @@ export default function App() {
           />
         </div>
       )}
-      {/* Result view: Google Meet layout — annotated video from backend job as main stage, original as PiP */}
+      {/* Result view: annotated video as main stage, original as draggable PiP */}
       {showResultView && !showApprovePage && resultVideoUrl && (
         <div ref={resultViewRef} className="result-view result-view--vision-pro">
-          {/* Main stage: annotated video from /jobs/:id/annotated-video (Meet “main speaker”) */}
+          {/* Main stage: annotated video from /jobs/:id/annotated-video */}
           <div className="result-view__main">
             {mainVideoSrc ? (
               <video
@@ -1162,7 +1165,7 @@ export default function App() {
           <div className="result-view__actions-wrap">
             {resultActionPending && (
               <span className="result-view__action-status" aria-live="polite">
-                {resultActionPending === 'rerunning' ? 'Rerunning…' : resultActionPending === 'correction' ? 'Starting…' : resultActionPending === 'approve' ? 'Approved' : 'Rejected'}
+                {resultActionPending === 'rerunning' ? 'Rerunning\u2026' : resultActionPending === 'correction' ? 'Starting\u2026' : resultActionPending === 'approve' ? 'Approved' : 'Rejected'}
               </span>
             )}
             <div className="result-view__actions">
@@ -1266,14 +1269,15 @@ export default function App() {
           {jobId && jobStatus?.status !== 'completed' && jobStatus?.status !== 'failed' && (
             <div className="vision-analysis-label" aria-live="polite">
               {resultActionPending === 'rerunning' || jobStatus?.status === 'rerunning'
-                ? `Video analysis (reanalyzing)… ${jobStatus != null ? `${Math.round((jobStatus.progress ?? 0) * 100)}%` : 'starting'}`
-                : `Vision analysis… ${jobStatus != null ? `${Math.round((jobStatus.progress ?? 0) * 100)}%` : 'starting'}`}
+                ? `Video analysis (reanalyzing)\u2026 ${jobStatus != null ? `${Math.round((jobStatus.progress ?? 0) * 100)}%` : 'starting'}`
+                : `Vision analysis\u2026 ${jobStatus != null ? `${Math.round((jobStatus.progress ?? 0) * 100)}%` : 'starting'}`}
             </div>
           )}
         </div>
       )}
       {!showPlaybackView && !showResultView && (
       <>
+      <h1 className="hero-title" aria-hidden="true">ROBO SIGHT</h1>
       <div className={`vision-pro-wrapper ${isProcessing ? 'vision-pro-wrapper--processing' : ''}`}>
         {isProcessing && (
           <div className="apple-intelligence-orb" aria-hidden="true">
