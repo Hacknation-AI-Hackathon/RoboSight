@@ -26,6 +26,7 @@ env/
 *.swp
 *.swo
 *~
+*.xml
 
 # OS
 .DS_Store

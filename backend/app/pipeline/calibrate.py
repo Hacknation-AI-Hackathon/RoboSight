@@ -158,16 +158,16 @@ def _adjust_thresholds(
 
         if avg_rejected_motion < motion_threshold * 1.5:
             motion_threshold = round(
-                min(motion_threshold * 1.2, 0.8), 4
+                min(motion_threshold * 1.1, 0.8), 4
             )
 
         if avg_rejected_proximity > 0:
             proximity_threshold = round(
-                max(proximity_threshold * 0.85, 50.0), 4
+                max(proximity_threshold * 0.95, 50.0), 4
             )
 
         dwell_time_threshold = round(
-            min(dwell_time_threshold * 1.15, 3.0), 4
+            min(dwell_time_threshold * 1.05, 3.0), 4
         )
 
     if added_events:
@@ -214,14 +214,14 @@ def _rebalance_weights(
         avg_vl = sum(e.signals.vl_confidence for e in rejected_events) / len(rejected_events)
 
         if avg_motion > 0.5 and avg_vl < 0.5:
-            motion_w *= 0.85
-            vl_w *= 1.2
+            motion_w *= 0.9
+            vl_w *= 1.1
         elif avg_vl > 0.5 and avg_motion < 0.3:
-            vl_w *= 0.85
-            motion_w *= 1.15
+            vl_w *= 0.9
+            motion_w *= 1.1
 
     if boundary_corrections:
-        proximity_w *= 1.1
+        proximity_w *= 1.05
 
     total = motion_w + proximity_w + vl_w
     if total > 0:
