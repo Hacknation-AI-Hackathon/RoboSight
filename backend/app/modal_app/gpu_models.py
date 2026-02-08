@@ -21,6 +21,7 @@ app = modal.App("robosight-gpu")
 # ---------------------------------------------------------------------------
 yolo_image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("libgl1-mesa-glx", "libglib2.0-0")
     .pip_install(
         "ultralytics>=8.3.0",
         "opencv-python-headless>=4.10.0",
@@ -31,8 +32,10 @@ yolo_image = (
 
 sam3_image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
     .pip_install(
         "torch>=2.4.0",
+        "torchvision>=0.19.0",
         "git+https://github.com/huggingface/transformers.git@2a5ba8b53d298ed8421e09831bf96bb6d056a24d",
         "Pillow>=10.0.0",
         "numpy>=1.26.0",
@@ -42,8 +45,10 @@ sam3_image = (
 
 vl_image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
     .pip_install(
         "torch>=2.4.0",
+        "torchvision>=0.19.0",
         "git+https://github.com/huggingface/transformers.git@2a5ba8b53d298ed8421e09831bf96bb6d056a24d",
         "Pillow>=10.0.0",
         "numpy>=1.26.0",
@@ -57,7 +62,7 @@ vl_image = (
 @app.cls(
     gpu="T4",
     image=yolo_image,
-    container_idle_timeout=300,
+    scaledown_window=300,
     timeout=600,
 )
 class YOLOServer:
@@ -77,16 +82,8 @@ class YOLOServer:
         self.model(dummy, verbose=False)
         print("YOLO model loaded and warmed up")
 
-    @modal.method()
-    def detect_persons(self, frame_bytes: bytes, confidence: float = 0.5) -> dict:
-        """Detect persons in a single frame.
-
-        Returns:
-            dict with keys:
-                boxes: list of [x1, y1, x2, y2] in absolute pixels
-                confidences: list of float confidence scores
-        """
-        import numpy as np
+    def _detect_single(self, frame_bytes: bytes, confidence: float = 0.5) -> dict:
+        """Internal: detect persons in a single frame."""
         from PIL import Image
         import io
 
@@ -99,7 +96,6 @@ class YOLOServer:
             boxes = result.boxes
             if len(boxes) == 0:
                 continue
-            # Class 0 = person in COCO
             mask = boxes.cls == 0
             for box, conf in zip(
                 boxes.xyxy[mask].cpu().numpy(),
@@ -111,21 +107,33 @@ class YOLOServer:
         return {"boxes": person_boxes, "confidences": person_confs}
 
     @modal.method()
+    def detect_persons(self, frame_bytes: bytes, confidence: float = 0.5) -> dict:
+        """Detect persons in a single frame.
+
+        Returns:
+            dict with keys:
+                boxes: list of [x1, y1, x2, y2] in absolute pixels
+                confidences: list of float confidence scores
+        """
+        return self._detect_single(frame_bytes, confidence)
+
+    @modal.method()
     def detect_batch(
         self, frames_bytes: list[bytes], confidence: float = 0.5
     ) -> list[dict]:
         """Batch detection for efficiency. Processes frames sequentially on GPU."""
-        return [self.detect_persons(fb, confidence) for fb in frames_bytes]
+        return [self._detect_single(fb, confidence) for fb in frames_bytes]
 
 
 # ---------------------------------------------------------------------------
 # 2. SAM3 Server — Text-Prompted Object Segmentation
 # ---------------------------------------------------------------------------
 @app.cls(
-    gpu="A100",
+    gpu="T4",
     image=sam3_image,
-    container_idle_timeout=300,
+    scaledown_window=300,
     timeout=600,
+    secrets=[modal.Secret.from_name("huggingface")],
 )
 class SAM3Server:
     """Segments objects in keyframes using SAM3 with text prompts.
@@ -136,12 +144,14 @@ class SAM3Server:
 
     @modal.enter()
     def load_model(self):
+        import os
         import torch
         from transformers import Sam3Processor, Sam3Model
 
+        hf_token = os.environ.get("HF_TOKEN")
         self.device = "cuda"
-        self.model = Sam3Model.from_pretrained("facebook/sam3").to(self.device)
-        self.processor = Sam3Processor.from_pretrained("facebook/sam3")
+        self.model = Sam3Model.from_pretrained("facebook/sam3", token=hf_token).to(self.device)
+        self.processor = Sam3Processor.from_pretrained("facebook/sam3", token=hf_token)
         self.model.eval()
         print("SAM3 model loaded")
 
@@ -225,10 +235,11 @@ Only include objects you can actually see in the image. Be precise about states.
 
 
 @app.cls(
-    gpu="A100",
+    gpu="T4",
     image=vl_image,
-    container_idle_timeout=300,
+    scaledown_window=300,
     timeout=600,
+    secrets=[modal.Secret.from_name("huggingface")],
 )
 class VLServer:
     """Analyzes keyframes for semantic scene understanding using LFM2.5-VL.
@@ -239,13 +250,16 @@ class VLServer:
 
     @modal.enter()
     def load_model(self):
+        import os
         import torch
         from transformers import AutoProcessor, AutoModelForImageTextToText
 
+        hf_token = os.environ.get("HF_TOKEN")
         self.model = AutoModelForImageTextToText.from_pretrained(
             "LiquidAI/LFM2.5-VL-1.6B",
             device_map="auto",
             torch_dtype=torch.bfloat16,
+            token=hf_token,
         )
         self.processor = AutoProcessor.from_pretrained("LiquidAI/LFM2.5-VL-1.6B")
         print("LFM2.5-VL model loaded")

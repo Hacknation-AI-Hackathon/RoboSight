@@ -70,6 +70,12 @@ def generate_annotated_video(
     width, height = video_info["resolution"]
     duration = video_info["duration_seconds"]
 
+    # Scale drawing parameters relative to 720p reference
+    scale = max(width, height) / 1280.0
+    bbox_thickness = max(2, int(2 * scale))
+    font_scale = 0.5 * scale
+    font_thickness = max(1, int(1 * scale))
+
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
@@ -97,7 +103,9 @@ def generate_annotated_video(
                     box,
                     label=f"person {conf:.2f}",
                     color=COLORS["person"],
-                    thickness=2,
+                    thickness=bbox_thickness,
+                    font_scale=font_scale,
+                    font_thickness=font_thickness,
                 )
 
         # --- Draw object bounding boxes with state labels ---
@@ -112,18 +120,20 @@ def generate_annotated_video(
                 state_str = f" [{current_state}]" if current_state else ""
                 display_label = f"{label}{state_str} {obj['score']:.2f}"
 
-                _draw_bbox(frame, obj["bbox"], label=display_label, color=color, thickness=2)
+                _draw_bbox(frame, obj["bbox"], label=display_label, color=color,
+                           thickness=bbox_thickness, font_scale=font_scale,
+                           font_thickness=font_thickness)
 
         # --- Draw event banner ---
         active_event = _get_active_event(events, timestamp)
         if active_event:
-            _draw_event_banner(frame, active_event, width)
+            _draw_event_banner(frame, active_event, width, font_scale, font_thickness)
 
         # --- Draw timeline bar ---
-        _draw_timeline_bar(frame, timestamp, duration, events, width, height)
+        _draw_timeline_bar(frame, timestamp, duration, events, width, height, bbox_thickness)
 
         # --- Draw timestamp ---
-        _draw_timestamp(frame, timestamp)
+        _draw_timestamp(frame, timestamp, font_scale, font_thickness)
 
         out.write(frame)
         frame_idx += 1
@@ -233,6 +243,8 @@ def _draw_bbox(
     label: str = "",
     color: tuple = (0, 255, 0),
     thickness: int = 2,
+    font_scale: float = 0.5,
+    font_thickness: int = 1,
 ):
     """Draw a bounding box with an optional label."""
     x1, y1, x2, y2 = [int(v) for v in bbox]
@@ -240,23 +252,22 @@ def _draw_bbox(
 
     if label:
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.5
-        font_thickness = 1
         text_size, _ = cv2.getTextSize(label, font, font_scale, font_thickness)
         text_w, text_h = text_size
+        pad = int(4 * (font_scale / 0.5))
 
         # Background rectangle for text
         cv2.rectangle(
             frame,
-            (x1, y1 - text_h - 8),
-            (x1 + text_w + 4, y1),
+            (x1, y1 - text_h - 2 * pad),
+            (x1 + text_w + pad, y1),
             color,
             -1,
         )
         cv2.putText(
             frame,
             label,
-            (x1 + 2, y1 - 4),
+            (x1 + pad // 2, y1 - pad),
             font,
             font_scale,
             (0, 0, 0),
@@ -265,7 +276,8 @@ def _draw_bbox(
 
 
 def _draw_event_banner(
-    frame: np.ndarray, event: dict, frame_width: int
+    frame: np.ndarray, event: dict, frame_width: int,
+    font_scale: float = 0.7, font_thickness: int = 2,
 ):
     """Draw an event banner at the top of the frame."""
     event_type = event.get("type", "unknown")
@@ -273,13 +285,13 @@ def _draw_event_banner(
     text = f"EVENT: {event_type} (conf: {confidence:.2f})"
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.7
-    font_thickness = 2
-    text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
+    banner_font_scale = font_scale * 1.4
+    banner_font_thickness = max(1, int(font_thickness * 1.5))
+    text_size, _ = cv2.getTextSize(text, font, banner_font_scale, banner_font_thickness)
     text_w, text_h = text_size
 
     # Semi-transparent banner background
-    banner_height = text_h + 20
+    banner_height = text_h + int(20 * (font_scale / 0.5))
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (frame_width, banner_height), EVENT_COLOR, -1)
     cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
@@ -291,9 +303,9 @@ def _draw_event_banner(
         text,
         (text_x, text_h + 10),
         font,
-        font_scale,
+        banner_font_scale,
         (255, 255, 255),
-        font_thickness,
+        banner_font_thickness,
     )
 
 
@@ -304,12 +316,14 @@ def _draw_timeline_bar(
     events: list[dict],
     frame_width: int,
     frame_height: int,
+    line_thickness: int = 2,
 ):
     """Draw a timeline bar at the bottom showing progress and events."""
-    bar_height = 20
-    bar_y = frame_height - bar_height - 10
-    bar_x = 20
-    bar_width = frame_width - 40
+    scale = max(frame_width, frame_height) / 1280.0
+    bar_height = int(20 * scale)
+    bar_y = frame_height - bar_height - int(10 * scale)
+    bar_x = int(20 * scale)
+    bar_width = frame_width - 2 * bar_x
 
     # Background bar
     cv2.rectangle(
@@ -340,12 +354,16 @@ def _draw_timeline_bar(
             (progress_x, bar_y - 5),
             (progress_x, bar_y + bar_height + 5),
             (255, 255, 255),
-            2,
+            line_thickness,
         )
 
 
-def _draw_timestamp(frame: np.ndarray, timestamp: float):
+def _draw_timestamp(frame: np.ndarray, timestamp: float,
+                    font_scale: float = 0.5, font_thickness: int = 1):
     """Draw timestamp in the bottom-left corner."""
     text = f"{timestamp:.1f}s"
     font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(frame, text, (10, frame.shape[0] - 40), font, 0.5, (255, 255, 255), 1)
+    pad = int(10 * (font_scale / 0.5))
+    y_offset = int(40 * (font_scale / 0.5))
+    cv2.putText(frame, text, (pad, frame.shape[0] - y_offset),
+                font, font_scale, (255, 255, 255), font_thickness)
