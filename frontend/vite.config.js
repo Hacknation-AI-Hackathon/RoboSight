@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      // Backend (Uvicorn on http://127.0.0.1:8000); /api/* → backend /*
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

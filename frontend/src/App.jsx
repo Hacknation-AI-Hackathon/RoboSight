@@ -8,7 +8,9 @@ const LARGE_VIDEO_PROCESSING_MS = 2500 // fixed delay for large videos - don't w
 const TRANSITION_VIDEO_PATH = '/video2.mp4'
 const TRANSITION_VIDEO_TO_PLAYBACK_MS = 600 // fade duration from transition video end to playback view
 const TRANSITION_VIDEO_PLAYBACK_RATE = 0.97 // slightly slower for smoother scroll recording playback
+// Backend proxy: Vite rewrites /api → http://127.0.0.1:8000
 const API_BASE = '/api'
+// Endpoints: POST /jobs, GET /jobs/:id, GET /jobs/:id/input-video, GET /jobs/:id/annotated-video
 const STATUS_POLL_MS = 2000 // poll job status every 2s during Vision analysis
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi']
@@ -45,10 +47,13 @@ export default function App() {
   const [playbackViewZoomingIn, setPlaybackViewZoomingIn] = useState(false)
   const [jobId, setJobId] = useState(null)
   const [jobStatus, setJobStatus] = useState(null)
+  const [inputVideoUrl, setInputVideoUrl] = useState(null)
+  const [playbackBlobUrl, setPlaybackBlobUrl] = useState(null)
   const [showResultView, setShowResultView] = useState(false)
   const [jobError, setJobError] = useState(null)
   const videoRef = useRef(null)
   const playbackVideoRef = useRef(null)
+  const playbackBlobUrlRef = useRef(null)
   const transitionVideoRef = useRef(null)
   const dropZoneRef = useRef(null)
   const hasSeenTransitionVideoRef = useRef(false)
@@ -156,16 +161,13 @@ export default function App() {
     if (processingVideosRef.current === 0) finishProcessing()
   }, [finishProcessing])
 
-  const handleThumbnailError = useCallback((index) => {
-    setDroppedFiles((prev) =>
-      prev.map((e, i) => (i === index ? { ...e, error: 'Unsupported format' } : e))
-    )
+  // No longer mark as unsupported: backend converts any video to MP4 for Vision Pro playback
+  const handleThumbnailError = useCallback((_index) => {
+    // Browser may not decode the video for thumbnail, but backend will convert it
   }, [])
 
-  const handlePlaybackVideoError = useCallback((index) => {
-    setDroppedFiles((prev) =>
-      prev.map((e, i) => (i === index ? { ...e, error: 'Unsupported format' } : e))
-    )
+  const handlePlaybackVideoError = useCallback((_index) => {
+    // Local blob may fail; backend returns converted MP4 via inputVideoUrl
   }, [])
 
   const handleTransitionVideoEnded = useCallback(() => {
@@ -252,7 +254,46 @@ export default function App() {
   const effectivePlaybackIndex =
     droppedFiles.length > 0 ? Math.min(playbackIndex, droppedFiles.length - 1) : 0
   const playbackEntry = droppedFiles[effectivePlaybackIndex]
-  const playbackUrl = playbackEntry?.url ?? null
+  // Video in Vision Pro mask: job's input-video (converted MP4)
+  const playbackUrl = inputVideoUrl || (jobId ? `${API_BASE}/jobs/${jobId}/input-video` : null)
+
+  // Fetch backend video as blob so it plays in Vision Pro (streaming URL can fail there)
+  useEffect(() => {
+    if (!playbackUrl || !playbackUrl.startsWith('/api')) {
+      if (playbackBlobUrlRef.current) {
+        URL.revokeObjectURL(playbackBlobUrlRef.current)
+        playbackBlobUrlRef.current = null
+      }
+      setPlaybackBlobUrl(null)
+      return
+    }
+    let cancelled = false
+    fetch(playbackUrl)
+      .then((r) => {
+        if (!r.ok) throw new Error(r.statusText)
+        return r.blob()
+      })
+      .then((blob) => {
+        if (cancelled) return
+        if (playbackBlobUrlRef.current) URL.revokeObjectURL(playbackBlobUrlRef.current)
+        const url = URL.createObjectURL(blob)
+        playbackBlobUrlRef.current = url
+        setPlaybackBlobUrl(url)
+      })
+      .catch(() => {
+        if (!cancelled) setPlaybackBlobUrl(null)
+      })
+    return () => {
+      cancelled = true
+      if (playbackBlobUrlRef.current) {
+        URL.revokeObjectURL(playbackBlobUrlRef.current)
+        playbackBlobUrlRef.current = null
+      }
+      setPlaybackBlobUrl(null)
+    }
+  }, [playbackUrl])
+
+  const effectivePlaybackSrc = playbackUrl?.startsWith('/api') ? playbackBlobUrl : playbackUrl
 
   useEffect(() => {
     if (showTransitionVideo && transitionVideoRef.current) {
@@ -269,6 +310,22 @@ export default function App() {
     }
   }, [showPlaybackView])
 
+  // When converted input-video URL arrives, ensure video loads and plays in Vision Pro mask
+  useEffect(() => {
+    if (!effectivePlaybackSrc || !showPlaybackView || !playbackVideoRef.current) return
+    const el = playbackVideoRef.current
+    const play = () => el.play().catch(() => {})
+    if (el.readyState >= 2) play()
+    else {
+      el.addEventListener('loadeddata', play, { once: true })
+      el.addEventListener('canplay', play, { once: true })
+      return () => {
+        el.removeEventListener('loadeddata', play)
+        el.removeEventListener('canplay', play)
+      }
+    }
+  }, [effectivePlaybackSrc, showPlaybackView])
+
   useEffect(() => {
     if (playbackViewZoomingIn) {
       const id = setTimeout(() => setPlaybackViewZoomingIn(false), 700)
@@ -276,7 +333,7 @@ export default function App() {
     }
   }, [playbackViewZoomingIn])
 
-  // Vision analysis: when we enter playback view (mask + video), create job and poll status every 2s until completed/failed
+  // Flow: drag & drop → process → enter playback view → POST /jobs (file) → remember job_id → use /jobs/{job_id}/input-video in Vision Pro mask
   useEffect(() => {
     if (!showPlaybackView || showResultView || !playbackEntry?.file || jobError) return
 
@@ -314,14 +371,19 @@ export default function App() {
         }
       }
     } else {
-      // Create job when entering Vision analysis screen
+      // POST /jobs with dropped file → backend creates job, returns job_id and input_video_url
       const form = new FormData()
       form.append('file', playbackEntry.file)
       fetch(`${API_BASE}/jobs`, { method: 'POST', body: form })
         .then((r) => r.json())
         .then((data) => {
-          if (data.job_id) setJobId(data.job_id)
-          else setJobError('Failed to create job')
+          if (data.job_id) {
+            setJobId(data.job_id)
+            // job_id/input-video = converted mp4; used for <video> inside Vision Pro mask
+            const path = (data.input_video_url || '').replace(/^\//, '')
+            setInputVideoUrl(path ? `${API_BASE}/${path}` : null)
+            if (!path) setJobError('No input video URL from server')
+          } else setJobError('Failed to create job')
         })
         .catch(() => setJobError('Failed to upload video'))
     }
@@ -332,7 +394,18 @@ export default function App() {
     setShowPlaybackView(false)
     setJobId(null)
     setJobStatus(null)
+    setInputVideoUrl(null)
     setJobError(null)
+    if (playbackBlobUrlRef.current) {
+      URL.revokeObjectURL(playbackBlobUrlRef.current)
+      playbackBlobUrlRef.current = null
+    }
+    setPlaybackBlobUrl(null)
+    setDroppedFiles((prev) => {
+      prev.forEach((e) => e?.url && URL.revokeObjectURL(e.url))
+      return []
+    })
+    hasSeenTransitionVideoRef.current = false
   }, [])
 
   const resultVideoUrl = jobId ? `${API_BASE}/jobs/${jobId}/annotated-video` : null
@@ -363,39 +436,27 @@ export default function App() {
           />
         </div>
       )}
-      {/* Result view: full-screen backend video + floating original video on the right */}
+      {/* Result view: annotated video inside Vision Pro headset only (no button) */}
       {showResultView && resultVideoUrl && (
-        <div className="result-view">
-          <video
-            className="result-view__main-video"
-            src={resultVideoUrl}
-            muted
-            playsInline
-            autoPlay
-            loop
-            preload="auto"
-          />
-          <div className="result-view__floating-original">
-            <span className="result-view__floating-label">Original</span>
-            {playbackUrl && (
+        <div className="result-view result-view--in-headset">
+          <div className="playback-view__headset">
+            <div className="playback-view__screen">
               <video
-                className="result-view__floating-video"
-                src={playbackUrl}
+                key={`result-${jobId}`}
+                className="playback-view__video"
+                src={resultVideoUrl}
                 muted
                 playsInline
+                autoPlay
                 loop
                 preload="auto"
+                onLoadedData={(e) => e.target.play().catch(() => {})}
+                onCanPlay={(e) => e.target.play().catch(() => {})}
               />
-            )}
+              <div className="playback-view__gradient" aria-hidden="true" />
+            </div>
+            <img src="/back-vision%20pro.png" alt="" className="playback-view__headset-img" />
           </div>
-          <button
-            type="button"
-            className="result-view__back"
-            onClick={handleBackFromResult}
-            aria-label="Back to analysis"
-          >
-            New video
-          </button>
         </div>
       )}
       {/* Vision analysis: back-vision pro mask + user video playing while we poll job status */}
@@ -404,7 +465,7 @@ export default function App() {
           {jobError && (
             <div className="playback-view__job-error">
               <span className="playback-view__error-text">{jobError}</span>
-              <button type="button" className="result-view__back" onClick={() => { setJobError(null); setJobId(null) }}>Retry</button>
+              <button type="button" className="result-view__back" onClick={() => { setJobError(null); setJobId(null); setInputVideoUrl(null) }}>Retry</button>
             </div>
           )}
           <div className="playback-view__headset">
@@ -414,11 +475,11 @@ export default function App() {
                   <span className="playback-view__error-text">{playbackEntry.error}</span>
                   <span className="playback-view__error-hint">Try another video or convert to H.264/MP4</span>
                 </div>
-              ) : playbackUrl ? (
+              ) : effectivePlaybackSrc ? (
                 <video
-                  key={effectivePlaybackIndex}
+                  key={jobId ? `job-${jobId}` : `blob-${effectivePlaybackIndex}`}
                   ref={playbackVideoRef}
-                  src={playbackUrl}
+                  src={effectivePlaybackSrc}
                   className="playback-view__video"
                   muted
                   playsInline
@@ -429,7 +490,17 @@ export default function App() {
                   onCanPlay={(e) => e.target.play().catch(() => {})}
                   onError={() => handlePlaybackVideoError(effectivePlaybackIndex)}
                 />
-              ) : null}
+              ) : playbackUrl ? (
+                <div className="playback-view__error">
+                  <span className="playback-view__error-text">Loading video…</span>
+                  <span className="playback-view__error-hint">Preparing playback</span>
+                </div>
+              ) : (
+                <div className="playback-view__error">
+                  <span className="playback-view__error-text">Converting video…</span>
+                  <span className="playback-view__error-hint">Preparing MP4 for playback</span>
+                </div>
+              )}
               <div className="playback-view__gradient" aria-hidden="true" />
             </div>
             <img src="/back-vision%20pro.png" alt="" className="playback-view__headset-img" />

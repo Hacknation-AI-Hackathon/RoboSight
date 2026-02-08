@@ -14,6 +14,8 @@ build/
 # Virtual environments
 venv/
 .venv/
+venv312/
+.venv312/
 env/
 
 # Environment variables
