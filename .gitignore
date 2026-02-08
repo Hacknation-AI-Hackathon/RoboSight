@@ -53,3 +53,4 @@ frontend/node_modules/@rollup/rollup-win32-x64-msvc/rollup.win32-x64-msvc.node
 
 frontend/node_modules/
 */node_modules/
+backend/backend_venv/
