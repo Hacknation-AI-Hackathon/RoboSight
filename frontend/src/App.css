@@ -69,11 +69,35 @@
   background: #F5F5F7;
   overflow: hidden;
   transition: background 0.4s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Helvetica Neue', sans-serif;
 }
 
 /* Black background during playback so zoom-in doesn't show light border */
 .page--playback {
   background: #000;
+}
+
+/* Hero title: large "ROBO SIGHT" behind the headset, Apple Vision Pro style */
+.hero-title {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(80px, 13vw, 200px);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 0.85;
+  text-align: center;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+  background: linear-gradient(to bottom, #86868b 0%, #a1a1a6 40%, #c5c5c7 80%, #d6d6d8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 /* Vision Pro wrapper – positions video + Apple Intelligence orb */
@@ -84,6 +108,8 @@
   left: 9.583%;
   top: 9.537%;
   pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: darken;
 }
 
 /* Image: same proportional size and position as 1552×873 at (184,103) in 1920×1080
@@ -845,6 +871,7 @@
   object-fit: contain;
   object-position: center;
   display: block;
+  cursor: pointer;
 }
 
 .result-view__main-video::-webkit-media-controls,
@@ -936,6 +963,27 @@
 .result-view__bar-title {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
+}
+
+.result-view__play-btn {
+  position: absolute;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.result-view__play-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
 }
 
 .result-view__back {

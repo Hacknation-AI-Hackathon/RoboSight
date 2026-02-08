@@ -66,6 +66,8 @@ export default function App() {
   const reverseRafRef = useRef(null)
   const statusPollIntervalRef = useRef(null)
   const resultVideoRef = useRef(null)
+  const pipVideoRef = useRef(null)
+  const [isResultPlaying, setIsResultPlaying] = useState(true)
 
   const hadFilesRef = useRef(0)
   hadFilesRef.current = droppedFiles.length
@@ -84,7 +86,7 @@ export default function App() {
           setJobId(data.job_id || jobFromUrl)
           setJobStatus(data)
           setShowPlaybackView(true)
-          setShowResultView(true)
+          // Don't setShowResultView here — the blob-fetch useEffect will do it once the annotated video is fully downloaded
         }
       })
       .catch(() => {})
@@ -372,7 +374,7 @@ export default function App() {
             clearInterval(statusPollIntervalRef.current)
             statusPollIntervalRef.current = null
           }
-          setShowResultView(true)
+          // Don't setShowResultView here — the blob-fetch useEffect will do it once the annotated video is fully downloaded
         } else if (data.status === 'failed') {
           if (statusPollIntervalRef.current) {
             clearInterval(statusPollIntervalRef.current)
@@ -435,13 +437,30 @@ export default function App() {
       return []
     })
     hasSeenTransitionVideoRef.current = false
+    setIsResultPlaying(true)
+  }, [])
+
+  const toggleResultPlayback = useCallback(() => {
+    const main = resultVideoRef.current
+    const pip = pipVideoRef.current
+    setIsResultPlaying((playing) => {
+      if (playing) {
+        main?.pause()
+        pip?.pause()
+      } else {
+        main?.play().catch(() => {})
+        pip?.play().catch(() => {})
+      }
+      return !playing
+    })
   }, [])
 
   const resultVideoUrl = jobId ? `${API_BASE}/jobs/${jobId}/annotated-video` : null
 
-  // As soon as result view is shown, fetch annotated video as blob so we can show it (and for Vision Pro compatibility)
+  // When job completes, fetch annotated video as a full blob BEFORE showing result view
+  const isJobCompleted = jobStatus?.status === 'completed'
   useEffect(() => {
-    if (!showResultView || !resultVideoUrl) {
+    if (!isJobCompleted || !resultVideoUrl) {
       if (annotatedBlobUrlRef.current) {
         URL.revokeObjectURL(annotatedBlobUrlRef.current)
         annotatedBlobUrlRef.current = null
@@ -461,6 +480,7 @@ export default function App() {
         const url = URL.createObjectURL(blob)
         annotatedBlobUrlRef.current = url
         setAnnotatedVideoBlobUrl(url)
+        setShowResultView(true) // Only show result view once blob is fully downloaded
       })
       .catch(() => {
         if (!cancelled) setAnnotatedVideoBlobUrl(null)
@@ -473,10 +493,10 @@ export default function App() {
       }
       setAnnotatedVideoBlobUrl(null)
     }
-  }, [showResultView, resultVideoUrl])
+  }, [isJobCompleted, resultVideoUrl])
 
-  // Main video must always use annotated-video URL so it never shows input (no blob mix-up)
-  const mainVideoSrc = resultVideoUrl || null
+  // Main video uses only the fully-downloaded blob URL (never the raw streaming URL)
+  const mainVideoSrc = annotatedVideoBlobUrl || null
 
   return (
     <div
@@ -524,9 +544,10 @@ export default function App() {
                 preload="auto"
                 disablePictureInPicture
                 disableRemotePlayback
+                onClick={toggleResultPlayback}
                 onLoadedData={(e) => e.target.play().catch(() => {})}
                 onCanPlay={(e) => e.target.play().catch(() => {})}
-              onError={(e) => console.warn('[RoboSight] Annotated video failed to load', e.target?.error)}
+                onError={(e) => console.warn('[RoboSight] Annotated video failed to load', e.target?.error)}
               />
             ) : (
               <div className="result-view__loading">
@@ -539,6 +560,7 @@ export default function App() {
           {effectivePlaybackSrc && (
             <div className="result-view__pip" aria-label="Original video">
               <video
+                ref={pipVideoRef}
                 className="result-view__pip-video"
                 src={effectivePlaybackSrc}
                 data-video-role="original"
@@ -561,6 +583,9 @@ export default function App() {
           {/* Bottom bar: Meet-style control strip */}
           <div className="result-view__bar">
             <span className="result-view__bar-title">RoboSight — Annotated result</span>
+            <button type="button" className="result-view__play-btn" onClick={toggleResultPlayback} aria-label={isResultPlaying ? 'Pause' : 'Play'}>
+              {isResultPlaying ? '⏸' : '▶'}
+            </button>
           </div>
         </div>
       )}
@@ -641,6 +666,7 @@ export default function App() {
       )}
       {!showPlaybackView && !showResultView && (
       <>
+      <h1 className="hero-title" aria-hidden="true">ROBO SIGHT</h1>
       <div className={`vision-pro-wrapper ${isProcessing ? 'vision-pro-wrapper--processing' : ''}`}>
         {isProcessing && (
           <div className="apple-intelligence-orb" aria-hidden="true">
