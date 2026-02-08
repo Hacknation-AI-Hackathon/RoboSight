@@ -469,6 +469,26 @@ async def get_metrics(job_id: str, run: str = "baseline"):
         )
 
 
+@app.get("/jobs/{job_id}/corrections")
+async def get_corrections(job_id: str):
+    """Get corrections submitted for a job."""
+    try:
+        data = job_manager.load_artifact(job_id, "corrections.json")
+        return JSONResponse(content=data)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No corrections found")
+
+
+@app.get("/jobs/{job_id}/calibration")
+async def get_calibration(job_id: str):
+    """Get calibration parameters for a job."""
+    try:
+        data = job_manager.load_artifact(job_id, "calibration.json")
+        return JSONResponse(content=data)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No calibration found")
+
+
 @app.get("/jobs/{job_id}/events")
 async def get_events(job_id: str):
     """Return events, objects, and state_timeline from world_gt.json for the review UI and charts."""

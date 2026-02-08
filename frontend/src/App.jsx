@@ -81,6 +81,8 @@ export default function App() {
     events: null,
     stateTimeline: null,
     semantics: null,
+    corrections: null,
+    calibration: null,
   })
   const [reportMetricsRun, setReportMetricsRun] = useState('baseline')
   const [reportLoading, setReportLoading] = useState(false)
@@ -730,16 +732,91 @@ export default function App() {
     [jobId]
   )
 
+  const parseCorrectionText = useCallback(
+    (text) => {
+      const corrections = []
+      if (!text || !text.trim()) return corrections
+      const lines = text.split(/[;\n]+/).map((l) => l.trim()).filter(Boolean)
+      for (const line of lines) {
+        const lower = line.toLowerCase()
+        // Match event references: "event 1", "evt_1", "evt 2", "event_2", "#1"
+        const evtMatch = lower.match(/(?:event|evt)[_\s]*(\d+)|#(\d+)/)
+        const evtNum = evtMatch ? (evtMatch[1] || evtMatch[2]) : null
+        const eventId = evtNum ? `evt_${evtNum}` : null
+        // Reject: "reject event 2", "remove event 1", "event 2 is wrong/false/incorrect"
+        if (/\b(reject|remove|delete|wrong|false|incorrect|not real|doesn'?t exist|fake)\b/.test(lower)) {
+          if (eventId) corrections.push({ event_id: eventId, action: 'reject' })
+          continue
+        }
+        // Adjust boundary: "event 1 starts at 3.5s", "event 2 ends at 9.9", "event 1 from 3.0 to 5.5"
+        const startMatch = lower.match(/start(?:s|ed)?\s+(?:at\s+)?(\d+\.?\d*)/)
+        const endMatch = lower.match(/(?:end(?:s|ed)?|close[sd]?)\s+(?:at\s+)?(\d+\.?\d*)/)
+        const fromToMatch = lower.match(/from\s+(\d+\.?\d*)\s*(?:s|sec)?\s*(?:to|-)\s*(\d+\.?\d*)/)
+        // Also match "at timestamp X" or "at X s"
+        const atTimestamp = lower.match(/(?:at\s+)?(?:timestamp\s+)?(\d+\.?\d*)\s*s?\b/)
+        if (eventId && (startMatch || endMatch || fromToMatch)) {
+          const corr = { event_id: eventId, action: 'adjust_boundary' }
+          if (fromToMatch) {
+            corr.corrected_start = parseFloat(fromToMatch[1])
+            corr.corrected_end = parseFloat(fromToMatch[2])
+          } else {
+            if (startMatch) corr.corrected_start = parseFloat(startMatch[1])
+            if (endMatch) corr.corrected_end = parseFloat(endMatch[1])
+          }
+          corrections.push(corr)
+          continue
+        }
+        // "event 2 closes/ends at 9.9s" — adjust end boundary
+        if (eventId && atTimestamp && /\b(close|end|stop|finish)\b/.test(lower)) {
+          corrections.push({
+            event_id: eventId,
+            action: 'adjust_boundary',
+            corrected_end: parseFloat(atTimestamp[1]),
+          })
+          continue
+        }
+        // "event 2 opens/starts at 3.5s" — adjust start boundary
+        if (eventId && atTimestamp && /\b(open|start|begin)\b/.test(lower)) {
+          corrections.push({
+            event_id: eventId,
+            action: 'adjust_boundary',
+            corrected_start: parseFloat(atTimestamp[1]),
+          })
+          continue
+        }
+        // Add event: "add open_drawer from 8.0 to 10.0", "new event close_cabinet at 9.0-11.0"
+        const addMatch = lower.match(/\b(?:add|new|missing|insert)\b/)
+        if (addMatch) {
+          const typeMatch = lower.match(/\b(open_drawer|close_drawer|open_cabinet|close_cabinet|open_door|close_door)\b/)
+          const rangeMatch = lower.match(/(\d+\.?\d*)\s*(?:s|sec)?\s*(?:to|-)\s*(\d+\.?\d*)/)
+          if (typeMatch && rangeMatch) {
+            corrections.push({
+              action: 'add_event',
+              type: typeMatch[1],
+              start_time: parseFloat(rangeMatch[1]),
+              end_time: parseFloat(rangeMatch[2]),
+            })
+          }
+          continue
+        }
+      }
+      return corrections
+    },
+    []
+  )
+
   const handleCorrectionRescan = useCallback(
     async () => {
       if (!jobId) return
       setShowCorrectionPopup(false)
       setResultActionPending('correction')
       try {
+        const corrections = parseCorrectionText(correctionText)
+        console.log('[RoboSight] Parsed corrections:', corrections)
         await fetch(`${API_BASE}/jobs/${jobId}/corrections`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ corrections: [] }),
+          body: JSON.stringify({ corrections }),
         })
         const r = await fetch(`${API_BASE}/jobs/${jobId}/rerun`, { method: 'POST' })
         if (r.ok) {
@@ -754,10 +831,10 @@ export default function App() {
         setResultActionPending(null)
       }
     },
-    [jobId]
+    [jobId, correctionText, parseCorrectionText]
   )
 
-  // Poll job when rerunning; go back to playback view, then show result view with new annotated video when completed
+  // Poll job when rerunning; on completion, go to reports/analysis page to show before/after comparison
   useEffect(() => {
     if (resultActionPending !== 'rerunning' || !jobId) return
     const poll = setInterval(async () => {
@@ -767,19 +844,26 @@ export default function App() {
         setJobStatus(data)
         if (data.status === 'completed') {
           setResultActionPending(null)
+          // Fetch new annotated video blob in background
           setAnnotatedVideoBlobUrl(null)
           if (annotatedBlobUrlRef.current) {
             URL.revokeObjectURL(annotatedBlobUrlRef.current)
             annotatedBlobUrlRef.current = null
           }
-          const b = await fetch(`${API_BASE}/jobs/${jobId}/annotated-video`)
-          if (b.ok) {
-            const blob = await b.blob()
-            const url = URL.createObjectURL(blob)
-            annotatedBlobUrlRef.current = url
-            setAnnotatedVideoBlobUrl(url)
-          }
-          setShowResultView(true)
+          fetch(`${API_BASE}/jobs/${jobId}/annotated-video`)
+            .then((b) => b.ok ? b.blob() : null)
+            .then((blob) => {
+              if (blob) {
+                const url = URL.createObjectURL(blob)
+                annotatedBlobUrlRef.current = url
+                setAnnotatedVideoBlobUrl(url)
+              }
+            })
+            .catch(() => {})
+          // Navigate to analysis page to show before/after metrics comparison
+          setShowResultView(false)
+          setApproveJobId(jobId)
+          setShowApprovePage(true)
         } else if (data.status === 'failed') {
           setResultActionPending(null)
         }
@@ -802,6 +886,8 @@ export default function App() {
       events: null,
       stateTimeline: null,
       semantics: null,
+      corrections: null,
+      calibration: null,
     }
     if (!id) {
       setReportData(empty)
@@ -823,8 +909,10 @@ export default function App() {
       fetch(`${base}/segmentations`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${base}/detections`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${base}/semantics`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/corrections`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/calibration`).then((r) => (r.ok ? r.json() : null)),
     ])
-      .then(([baseline, rescanMetrics, confidence, timeline, worldGt, eventsPayload, segmentations, detections, semantics]) => {
+      .then(([baseline, rescanMetrics, confidence, timeline, worldGt, eventsPayload, segmentations, detections, semantics, corrections, calibration]) => {
         setReportMetricsRun(rescanMetrics != null ? 'calibrated' : 'baseline')
         const eventsList = Array.isArray(eventsPayload) ? [] : (eventsPayload?.events ?? [])
         const stateTimeline = Array.isArray(eventsPayload) ? [] : (eventsPayload?.state_timeline ?? [])
@@ -839,6 +927,8 @@ export default function App() {
           events: eventsList,
           stateTimeline,
           semantics: Array.isArray(semantics) ? semantics : null,
+          corrections: corrections?.corrections ?? null,
+          calibration: calibration || null,
         })
         setReportError(null)
       })
@@ -1008,7 +1098,7 @@ export default function App() {
                     {/* Chart 4: State Timeline — horizontal Gantt: state bars per object */}
                     <div className="reports-page__card">
                       <h3 className="reports-page__card-title">State Timeline</h3>
-                      <div className="reports-page__chart-wrap">
+                      <div className="reports-page__chart-wrap reports-page__chart-wrap--gantt">
                         {reportData.stateTimeline?.length > 0 ? (
                           (() => {
                             const tl = reportData.stateTimeline
@@ -1035,8 +1125,11 @@ export default function App() {
                                               width: `${Math.max(w, 2)}%`,
                                               backgroundColor: isOpen ? 'rgba(52, 199, 89, 0.85)' : 'rgba(255, 59, 48, 0.85)',
                                             }}
-                                            title={`${seg.state ?? '?'} ${start.toFixed(1)}–${end.toFixed(1)}`}
-                                          />
+                                          >
+                                            <span className="reports-page__gantt-tooltip">
+                                              {seg.state ?? '?'} &middot; {start.toFixed(1)}s – {end.toFixed(1)}s
+                                            </span>
+                                          </div>
                                         )
                                       })}
                                     </div>
@@ -1123,11 +1216,132 @@ export default function App() {
                         <span className="reports-page__stat-label">Review rate</span>
                       </div>
                       <div className="reports-page__stat-card">
-                        <span className="reports-page__stat-value">95.8%</span>
+                        <span className="reports-page__stat-value">
+                          {(reportData.rescanMetrics ?? reportData.metrics)?.labeling_time_saved_estimate != null
+                            ? `${((reportData.rescanMetrics ?? reportData.metrics).labeling_time_saved_estimate).toFixed(1)}%`
+                            : '—'}
+                        </span>
                         <span className="reports-page__stat-label">Time saved</span>
                       </div>
                     </div>
                   </div>
+                  {/* Before/After Calibration Comparison — shown when rescanMetrics (calibrated) exists */}
+                  {reportData.rescanMetrics != null && reportData.metrics != null && (
+                    <div className="reports-page__card reports-page__card--comparison">
+                      <h3 className="reports-page__card-title">Zero-Shot vs Calibrated</h3>
+                      <div className="reports-page__comparison-grid">
+                        {[
+                          { label: 'Precision', key: 'event_precision', format: (v) => `${(v * 100).toFixed(1)}%` },
+                          { label: 'Recall', key: 'event_recall', format: (v) => `${(v * 100).toFixed(1)}%` },
+                          { label: 'Boundary Error', key: 'avg_boundary_error', format: (v) => `${v.toFixed(3)}s`, lower: true },
+                          { label: 'Review Rate', key: 'review_percentage', format: (v) => `${v.toFixed(1)}%`, lower: true },
+                          { label: 'Time Saved', key: 'labeling_time_saved_estimate', format: (v) => `${v.toFixed(1)}%` },
+                          { label: 'Events (GT)', key: 'total_events_ground_truth', format: (v) => String(v) },
+                        ].map(({ label, key, format, lower }) => {
+                          const baseVal = reportData.metrics[key] ?? 0
+                          const calVal = reportData.rescanMetrics[key] ?? 0
+                          const diff = calVal - baseVal
+                          const improved = lower ? diff < 0 : diff > 0
+                          const worsened = lower ? diff > 0 : diff < 0
+                          return (
+                            <div key={key} className="reports-page__comparison-row">
+                              <span className="reports-page__comparison-label">{label}</span>
+                              <span className="reports-page__comparison-baseline">{format(baseVal)}</span>
+                              <span className="reports-page__comparison-arrow">→</span>
+                              <span className={`reports-page__comparison-calibrated ${improved ? 'reports-page__comparison-calibrated--improved' : ''} ${worsened ? 'reports-page__comparison-calibrated--worsened' : ''}`}>
+                                {format(calVal)}
+                              </span>
+                              <span className={`reports-page__comparison-delta ${improved ? 'reports-page__comparison-delta--improved' : ''} ${worsened ? 'reports-page__comparison-delta--worsened' : ''}`}>
+                                {diff === 0 ? '—' : `${diff > 0 ? '+' : ''}${key === 'avg_boundary_error' ? diff.toFixed(3) + 's' : key === 'total_events_ground_truth' ? String(diff) : (diff * (key.includes('percentage') || key.includes('estimate') ? 1 : 100)).toFixed(1) + (key.includes('percentage') || key.includes('estimate') ? 'pp' : 'pp')}`}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {/* Visual bar chart: Baseline vs Calibrated side-by-side */}
+                  {reportData.rescanMetrics != null && reportData.metrics != null && (
+                    <div className="reports-page__card">
+                      <h3 className="reports-page__card-title">Baseline vs Calibrated</h3>
+                      <div className="reports-page__chart-wrap">
+                        {(() => {
+                          const m = reportData.metrics
+                          const c = reportData.rescanMetrics
+                          const data = [
+                            { name: 'Precision', Baseline: +(m.event_precision * 100).toFixed(1), Calibrated: +(c.event_precision * 100).toFixed(1) },
+                            { name: 'Recall', Baseline: +(m.event_recall * 100).toFixed(1), Calibrated: +(c.event_recall * 100).toFixed(1) },
+                            { name: 'Time Saved', Baseline: +m.labeling_time_saved_estimate.toFixed(1), Calibrated: +c.labeling_time_saved_estimate.toFixed(1) },
+                          ]
+                          return (
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} />
+                                <Tooltip formatter={(v) => [`${v}%`, '']} />
+                                <Legend />
+                                <Bar dataKey="Baseline" fill="rgba(0,0,0,0.2)" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="Calibrated" fill="#007AFF" radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                  {/* Corrections Applied — what the human submitted */}
+                  {reportData.corrections?.length > 0 && (
+                    <div className="reports-page__card reports-page__card--corrections">
+                      <h3 className="reports-page__card-title">Corrections Applied</h3>
+                      <div className="reports-page__corrections-list">
+                        {reportData.corrections.map((c, i) => (
+                          <div key={i} className="reports-page__correction-item">
+                            <span className={`reports-page__correction-badge reports-page__correction-badge--${c.action}`}>
+                              {c.action === 'reject' ? 'Reject' : c.action === 'adjust_boundary' ? 'Adjust' : c.action === 'add_event' ? 'Add' : c.action}
+                            </span>
+                            <span className="reports-page__correction-detail">
+                              {c.event_id && <strong>{c.event_id}</strong>}
+                              {c.corrected_start != null && <> start → {c.corrected_start.toFixed(2)}s</>}
+                              {c.corrected_end != null && <> end → {c.corrected_end.toFixed(2)}s</>}
+                              {c.type && <> type: {c.type}</>}
+                              {c.start_time != null && c.end_time != null && <> {c.start_time.toFixed(1)}s–{c.end_time.toFixed(1)}s</>}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Calibration Parameters — what the system learned */}
+                  {reportData.calibration != null && (
+                    <div className="reports-page__card reports-page__card--calibration">
+                      <h3 className="reports-page__card-title">Learned Parameters</h3>
+                      <div className="reports-page__calibration-grid">
+                        {[
+                          { label: 'Motion Threshold', key: 'motion_threshold', default: 0.15 },
+                          { label: 'Proximity Threshold', key: 'proximity_threshold', default: 200.0 },
+                          { label: 'Dwell Time', key: 'dwell_time_threshold', default: 0.5 },
+                          { label: 'Motion Weight', key: 'motion_weight', default: 0.4 },
+                          { label: 'Proximity Weight', key: 'proximity_weight', default: 0.3 },
+                          { label: 'VL Weight', key: 'vl_weight', default: 0.3 },
+                          { label: 'Start Offset', key: 'start_offset', default: 0.0 },
+                          { label: 'End Offset', key: 'end_offset', default: 0.0 },
+                        ].map(({ label, key, default: def }) => {
+                          const val = reportData.calibration[key]
+                          const changed = val != null && Math.abs(val - def) > 0.0001
+                          return (
+                            <div key={key} className={`reports-page__calibration-item ${changed ? 'reports-page__calibration-item--changed' : ''}`}>
+                              <span className="reports-page__calibration-label">{label}</span>
+                              <span className="reports-page__calibration-value">
+                                {val != null ? (typeof val === 'number' ? val.toFixed(4) : String(val)) : '—'}
+                                {changed && <span className="reports-page__calibration-badge">changed</span>}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 <div className="reports-page__json-wrap reports-page__json-wrap--below-metrics">
                     <h3 className="reports-page__card-title">Raw JSON</h3>
                     <div className="reports-page__json-tabs">
@@ -1345,7 +1559,7 @@ export default function App() {
                 <textarea
                   id="correction-popup-input"
                   className="correction-popup__input"
-                  placeholder="Describe what to correct for rescan…"
+                  placeholder="e.g. reject event 2; event 1 ends at 9.9s; add open_drawer from 8.0 to 10.0"
                   value={correctionText}
                   onChange={(e) => setCorrectionText(e.target.value)}
                   rows={3}

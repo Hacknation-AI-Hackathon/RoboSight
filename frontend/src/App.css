@@ -1267,7 +1267,8 @@
   flex-direction: column;
   gap: 16px;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .reports-page__video-wrap {
@@ -1381,17 +1382,21 @@
 
 .reports-page__right {
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+.reports-page__right > .reports-page__card,
+.reports-page__right > .reports-page__json-wrap {
+  flex-shrink: 0;
+}
+
 .reports-page__chart-wrap {
   width: 100%;
-  aspect-ratio: 1;
-  min-height: 200px;
-  max-height: 420px;
+  height: 220px;
   flex-shrink: 0;
 }
 
@@ -1399,9 +1404,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  flex-shrink: 0;
 }
 
 .reports-page__loading {
@@ -1515,12 +1518,9 @@
   flex: 1;
 }
 
-.reports-page__card:has(.reports-page__chart-wrap) {
-  min-height: 0;
-}
-
-.reports-page__left .reports-page__card:has(.reports-page__chart-wrap) {
-  min-height: 160px;
+.reports-page__graphs > .reports-page__card {
+  flex-shrink: 0;
+  min-height: 260px;
 }
 
 .reports-page__chart-empty {
@@ -1537,7 +1537,7 @@
 .reports-page__gantt {
   width: 100%;
   height: 100%;
-  overflow: auto;
+  overflow: visible;
   padding: 8px 0;
 }
 
@@ -1563,7 +1563,7 @@
   height: 18px;
   background: rgba(0, 0, 0, 0.06);
   border-radius: 4px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .reports-page__gantt-seg {
@@ -1572,9 +1572,39 @@
   height: 100%;
   border-radius: 3px;
   min-width: 4px;
+  cursor: pointer;
+}
+
+/* Gantt segment tooltip */
+.reports-page__gantt-seg .reports-page__gantt-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.82);
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 10;
+}
+
+.reports-page__gantt-seg:hover .reports-page__gantt-tooltip {
+  opacity: 1;
+}
+
+.reports-page__chart-wrap--gantt {
+  overflow: visible;
 }
 
 .reports-page__chart-wrap--table {
+  height: auto;
+  max-height: 260px;
   overflow: auto;
 }
 
@@ -1642,7 +1672,7 @@
   margin-top: 4px;
 }
 
-.reports-page__card:has(.reports-page__chart-wrap) .reports-page__card-title {
+.reports-page__graphs .reports-page__card-title {
   flex-shrink: 0;
 }
 
@@ -1747,6 +1777,194 @@
   min-width: 100px;
 }
 
+/* Corrections Applied card */
+.reports-page__card--corrections {
+  border-color: rgba(175, 82, 222, 0.2);
+}
+
+.reports-page__corrections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reports-page__correction-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+}
+
+.reports-page__correction-badge {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.reports-page__correction-badge--reject {
+  background: rgba(255, 59, 48, 0.12);
+  color: #FF3B30;
+}
+
+.reports-page__correction-badge--adjust_boundary {
+  background: rgba(0, 122, 255, 0.12);
+  color: #007AFF;
+}
+
+.reports-page__correction-badge--add_event {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34C759;
+}
+
+.reports-page__correction-detail {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.reports-page__correction-detail strong {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.9);
+}
+
+/* Calibration Parameters card */
+.reports-page__card--calibration {
+  border-color: rgba(52, 199, 89, 0.2);
+}
+
+.reports-page__calibration-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.reports-page__calibration-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+  transition: background 0.15s ease;
+}
+
+.reports-page__calibration-item--changed {
+  background: rgba(0, 122, 255, 0.06);
+}
+
+.reports-page__calibration-label {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.reports-page__calibration-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reports-page__calibration-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0, 122, 255, 0.15);
+  color: #007AFF;
+}
+
+/* Before/After Calibration Comparison */
+.reports-page__card--comparison {
+  border-color: rgba(0, 122, 255, 0.2);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.reports-page__comparison-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.reports-page__comparison-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 24px 80px 72px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  transition: background 0.15s ease;
+}
+
+.reports-page__comparison-row:last-child {
+  border-bottom: none;
+}
+
+.reports-page__comparison-row:hover {
+  background: rgba(0, 122, 255, 0.04);
+}
+
+.reports-page__comparison-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.reports-page__comparison-baseline {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.5);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.reports-page__comparison-arrow {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.reports-page__comparison-calibrated {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.reports-page__comparison-calibrated--improved {
+  color: #34C759;
+}
+
+.reports-page__comparison-calibrated--worsened {
+  color: #FF3B30;
+}
+
+.reports-page__comparison-delta {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.4);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.reports-page__comparison-delta--improved {
+  color: #34C759;
+}
+
+.reports-page__comparison-delta--worsened {
+  color: #FF3B30;
+}
+
 @media (max-width: 900px) {
   .reports-page__layout {
     grid-template-columns: 1fr;
@@ -1760,5 +1978,10 @@
   }
   .reports-page__card--metrics {
     grid-column: 1;
+  }
+  .reports-page__comparison-row {
+    grid-template-columns: 1fr 64px 20px 64px 56px;
+    gap: 4px;
+    padding: 8px;
   }
 }
