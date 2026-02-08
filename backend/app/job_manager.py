@@ -188,13 +188,24 @@ class JobManager:
     # Video file management
     # ------------------------------------------------------------------
 
-    def save_input_video(self, job_id: str, video_bytes: bytes) -> Path:
+    def save_input_video(
+        self, job_id: str, video_bytes: bytes, original_filename: str = "input.mp4"
+    ) -> Path:
         """Save the uploaded video to the job directory.
+
+        Preserves the original file extension so format conversion
+        can detect the source format.
+
+        Args:
+            job_id: The job identifier.
+            video_bytes: Raw video file bytes.
+            original_filename: Original upload filename (for extension).
 
         Returns:
             Path to the saved video file.
         """
-        path = self._job_dir(job_id) / "input.mp4"
+        ext = Path(original_filename).suffix.lower() or ".mp4"
+        path = self._job_dir(job_id) / f"input{ext}"
         with open(path, "wb") as f:
             f.write(video_bytes)
         return path
@@ -202,13 +213,20 @@ class JobManager:
     def get_input_video_path(self, job_id: str) -> Path:
         """Get path to the input video for a job.
 
+        Looks for input.mp4 first, then any input.* video file.
+
         Raises:
             FileNotFoundError: If no input video exists.
         """
-        path = self._job_dir(job_id) / "input.mp4"
-        if not path.exists():
-            raise FileNotFoundError(f"Input video not found for job {job_id}")
-        return path
+        mp4_path = self._job_dir(job_id) / "input.mp4"
+        if mp4_path.exists():
+            return mp4_path
+
+        for p in self._job_dir(job_id).glob("input.*"):
+            if p.suffix.lower() in {".mp4", ".mov", ".avi", ".webm", ".mkv", ".wmv"}:
+                return p
+
+        raise FileNotFoundError(f"Input video not found for job {job_id}")
 
     # ------------------------------------------------------------------
     # Job listing and cleanup

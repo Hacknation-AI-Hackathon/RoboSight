@@ -9,6 +9,7 @@ pydantic-settings>=2.5.0
 opencv-python-headless>=4.10.0
 numpy>=1.26.0
 Pillow>=10.0.0
+imageio-ffmpeg>=0.5.1
 
 # Modal (cloud GPU inference) — only needed if backend=modal
 modal>=1.0.0
