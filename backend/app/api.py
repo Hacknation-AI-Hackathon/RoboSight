@@ -19,6 +19,10 @@ from app.job_manager import JobManager
 from app.models import (
     JobStatus,
     CorrectionPayload,
+    Correction,
+    CorrectionAction,
+    ReviewPayload,
+    ReviewAction,
     MetricsResult,
 )
 from app.pipeline import infer, calibrate, compile, eval
@@ -463,3 +467,62 @@ async def get_metrics(job_id: str, run: str = "baseline"):
             status_code=404,
             detail=f"Metrics ({run}) not available yet or job not found",
         )
+
+
+@app.get("/jobs/{job_id}/events")
+async def get_events(job_id: str):
+    """Return events and objects from world_gt.json for the review UI."""
+    try:
+        data = job_manager.load_artifact(job_id, "world_gt.json")
+        return JSONResponse(content={
+            "events": data.get("events", []),
+            "objects": data.get("objects", []),
+        })
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Events not available yet or job not found",
+        )
+
+
+@app.post("/jobs/{job_id}/review")
+async def review_job(job_id: str, payload: ReviewPayload):
+    """Simple 3-button review: approve, correct, or reject."""
+    try:
+        job = job_manager.get_job(job_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    if job["status"] not in ("completed", "approved", "rejected"):
+        raise HTTPException(
+            status_code=400, detail="Job must be completed before review"
+        )
+
+    if payload.action == ReviewAction.APPROVE:
+        job_manager.mark_approved(job_id)
+        return {"status": "approved"}
+
+    if payload.action == ReviewAction.REJECT:
+        job_manager.mark_rejected(job_id)
+        return {"status": "rejected"}
+
+    # CORRECT: convert rejected_events → corrections, save, and rerun
+    if not payload.rejected_events:
+        raise HTTPException(
+            status_code=400,
+            detail="rejected_events required for 'correct' action",
+        )
+
+    corrections = CorrectionPayload(
+        corrections=[
+            Correction(event_id=eid, action=CorrectionAction.REJECT)
+            for eid in payload.rejected_events
+        ]
+    )
+    job_manager.save_artifact(job_id, "corrections.json", corrections)
+
+    asyncio.create_task(
+        asyncio.to_thread(_run_calibrated_rerun_sync, job_id)
+    )
+
+    return {"status": "rerunning"}

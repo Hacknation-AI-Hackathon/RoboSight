@@ -14,6 +14,9 @@ Overlays:
 
 import cv2
 import numpy as np
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -76,8 +79,12 @@ def generate_annotated_video(
     font_scale = 0.5 * scale
     font_thickness = max(1, int(1 * scale))
 
+    # Write to a temp file first (mp4v codec), then re-encode to H.264 for browser playback
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+    os.close(tmp_fd)
+
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    out = cv2.VideoWriter(tmp_path, fourcc, fps, (width, height))
 
     # Build lookup structures for efficient per-frame annotation
     detection_lookup = _build_detection_lookup(detections, fps, sample_fps)
@@ -140,6 +147,21 @@ def generate_annotated_video(
 
     cap.release()
     out.release()
+
+    # Re-encode from MPEG-4 Part 2 → H.264 so browsers can play it
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", tmp_path,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-an",  # no audio track needed
+            output_path,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    Path(tmp_path).unlink(missing_ok=True)
 
     return output_path
 
