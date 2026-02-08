@@ -1,23 +1,48 @@
 # RoboSight Backend — Full Implementation Plan
 
-> **One-liner**: A backend pipeline that converts raw human video into structured, temporal ground truth for humanoid navigation by composing YOLO, SAM3, and LFM2.5-VL on Modal GPUs, with inference-time calibration from minimal human feedback.
+> **One-liner**: A backend pipeline that converts raw human video into structured, temporal ground truth for humanoid navigation by composing YOLO, SAM3, and LFM2.5-VL (on Modal cloud GPU or local NVIDIA GPU), with inference-time calibration from minimal human feedback.
 
 ---
 
 ## Architecture
 
+Supports **two backends** — same pipeline, same outputs, switchable via config:
+
+### Option A: Modal Cloud GPU
 ```
 Raw Video
   ↓
-Frame Sampling (ingest.py)                    ← Dev A
+Frame Sampling (ingest.py)
   ↓
-┌─────────────────── Modal A100 GPU ───────────────────┐
-│  YOLO (detect.py) — persons, every frame             │ ← Dev A
-│  SAM3 (segment.py) — objects, keyframes only          │ ← Dev A
-│  LFM2.5-VL (semantics.py) — actions/states, keyframes│ ← Dev A
-└──────────────────────────────────────────────────────┘
+┌────────── Modal Cloud GPU (A100/T4) ──────────┐
+│  YOLO (detect.py)      — persons, every frame  │
+│  SAM3 (segment.py)     — objects, keyframes     │  ← All 3 run IN PARALLEL
+│  LFM2.5-VL (semantics) — actions, keyframes    │     on separate containers
+└────────────────────────────────────────────────┘
   ↓
-Temporal Ground-Truth Compiler (infer.py)      ← Dev B
+```
+
+### Option B: Local NVIDIA GPU (e.g. RTX 5090 16GB)
+```
+Raw Video
+  ↓
+Frame Sampling (ingest.py)
+  ↓
+┌────────── Local NVIDIA GPU ───────────────────┐
+│  YOLO (~300MB)   — ultralytics                 │
+│  SAM3 (~2-3GB)   — HF transformers             │  ← All 3 loaded
+│  LFM2.5-VL (~3-4GB) — HF or vLLM accelerated  │     simultaneously (~8GB)
+└────────────────────────────────────────────────┘
+  ↓
+```
+
+### Common pipeline (both backends):
+```
+Model Outputs (detections + segmentations + semantics)
+  ↓
+orchestrator.py            — parallel execution + output merging
+  ↓
+Temporal Ground-Truth Compiler (infer.py)      ← Dev B — THE CORE LOGIC
   ↓
 Calibration Engine (calibrate.py)              ← Dev B
   ↓
@@ -36,33 +61,40 @@ Evaluation Metrics (eval.py)                   ← Dev B
 
 ```
 backend/
-├── requirements.txt
+├── requirements.txt              # Base dependencies (FastAPI, cv2, etc.)
+├── requirements-local-gpu.txt    # Additional deps for local GPU (torch, transformers, ultralytics)
+├── IMPLEMENTATION_PLAN.md
 ├── app/
 │   ├── __init__.py
-│   ├── api.py                  # FastAPI routes + pipeline orchestrator [Dev B]
-│   ├── config.py               # Settings + calibratable thresholds     [Dev B]
-│   ├── models.py               # Pydantic models (data contracts)       [Dev B]
-│   ├── job_manager.py          # In-memory job lifecycle                [Dev B]
+│   ├── api.py                    # FastAPI routes + pipeline orchestrator     [Dev B]
+│   ├── config.py                 # Settings + calibratable thresholds         [DONE]
+│   ├── models.py                 # Pydantic models (data contracts)           [Dev B]
+│   ├── job_manager.py            # In-memory job lifecycle                    [Dev B]
 │   ├── pipeline/
 │   │   ├── __init__.py
-│   │   ├── ingest.py           # Video decode + frame sampling          [Dev A]
-│   │   ├── detect.py           # YOLO wrapper → Modal                   [Dev A]
-│   │   ├── segment.py          # SAM3 wrapper → Modal                   [Dev A]
-│   │   ├── semantics.py        # LFM2.5-VL wrapper → Modal             [Dev A]
-│   │   ├── infer.py            # State machine + event detection        [Dev B]
-│   │   ├── calibrate.py        # Threshold calibration from corrections [Dev B]
-│   │   ├── compile.py          # world_gt.json assembly                 [Dev B]
-│   │   ├── annotate.py         # Video overlay (bboxes + labels)        [Dev A]
-│   │   └── eval.py             # Metrics computation                    [Dev B]
+│   │   ├── orchestrator.py       # Parallel model execution + merging         [DONE]
+│   │   ├── ingest.py             # Video decode + frame sampling              [DONE]
+│   │   ├── detect.py             # YOLO wrapper (modal + local backends)      [DONE]
+│   │   ├── segment.py            # SAM3 wrapper (modal + local backends)      [DONE]
+│   │   ├── semantics.py          # LFM2.5-VL wrapper (modal + local + vllm)  [DONE]
+│   │   ├── infer.py              # State machine + event detection            [Dev B]
+│   │   ├── calibrate.py          # Threshold calibration from corrections     [Dev B]
+│   │   ├── compile.py            # world_gt.json assembly                     [Dev B]
+│   │   ├── annotate.py           # Video overlay (bboxes + labels)            [DONE]
+│   │   └── eval.py               # Metrics computation                        [Dev B]
 │   ├── modal_app/
 │   │   ├── __init__.py
-│   │   └── gpu_models.py       # 3 Modal GPU servers (YOLO,SAM3,VL)    [Dev A]
+│   │   └── gpu_models.py         # 3 Modal GPU servers (YOLO,SAM3,VL)        [DONE]
+│   ├── local_app/
+│   │   ├── __init__.py
+│   │   └── gpu_models.py         # 3 Local GPU servers (same interface)       [DONE]
 │   └── schemas/
-│       ├── ontology_v0_1.json  # Object ontology                       [Dev B]
+│       ├── ontology_v0_1.json    # Object ontology                            [Dev B]
 │       └── world_gt.schema.json
-├── jobs/                       # Job output directory (auto-created)
+├── data/                         # Demo videos go here
+├── jobs/                         # Job output directory (auto-created)
 └── scripts/
-    └── run_demo.py             # End-to-end demo script
+    └── run_demo.py               # End-to-end demo script
 ```
 
 ---
@@ -261,13 +293,33 @@ CORS enabled for frontend.
 
 ## Technical Details
 
-### Modal Setup
+### Dual Backend System
+All pipeline wrappers (`detect.py`, `segment.py`, `semantics.py`) accept a `backend` parameter:
+- `"modal"` → calls Modal cloud GPU containers via `.remote()`
+- `"local"` → calls local NVIDIA GPU via singleton model servers
+- `"local_vllm"` → same as local but uses vLLM for VL model acceleration
+
+Set in `config.py` via `ROBOSIGHT_BACKEND=local` environment variable.
+
+The `orchestrator.py` runs all 3 models **in parallel** using `ThreadPoolExecutor`:
+- Modal: each thread calls a different remote container (true parallelism)
+- Local: threads share one GPU but overlap I/O with compute
+
+### Modal Setup (backend=modal)
 - Single Modal App `robosight-gpu` with 3 classes
-- All run on A100 GPU
+- YOLO on T4, SAM3 + VL on A100
 - Models loaded once via `@modal.enter()`, persisted across calls
 - Local code calls `.remote()` — no web endpoints needed
 - Frame transfer: JPEG bytes (~100-200KB per frame)
-- SAM3 optimization: pre-compute vision embeddings once, run multiple text prompts
+
+### Local GPU Setup (backend=local)
+- All 3 models loaded simultaneously as singletons (~6-8GB VRAM)
+- YOLO: ~300MB (ultralytics)
+- SAM3: ~2-3GB (HF transformers)
+- LFM2.5-VL: ~3-4GB (bfloat16)
+- Fits in 16GB with room to spare
+- Optional vLLM acceleration for VL model (PagedAttention, continuous batching)
+- Install: `pip install -r requirements-local-gpu.txt`
 
 ### Frame Sampling Strategy
 - Sample at 5 FPS from source video

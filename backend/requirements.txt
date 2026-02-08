@@ -1,0 +1,17 @@
+# FastAPI + server
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+
+# Video processing
+opencv-python-headless>=4.10.0
+numpy>=1.26.0
+Pillow>=10.0.0
+
+# Modal (cloud GPU inference) — only needed if backend=modal
+modal>=1.0.0
+
+# CORS
+starlette>=0.40.0
