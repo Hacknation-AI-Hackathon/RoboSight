@@ -1,4 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+  CartesianGrid,
+} from 'recharts'
 import './App.css'
 
 const VIDEO_SIZE_THRESHOLD = 1024 * 1024 // 1MB - show processing for larger videos
@@ -7,7 +20,7 @@ const POST_PROCESSING_DELAY_MS = 1000 // wait 1 sec after processing before show
 const LARGE_VIDEO_PROCESSING_MS = 2500 // fixed delay for large videos - don't wait for metadata (can hang)
 const TRANSITION_VIDEO_PATH = '/video2.mp4'
 const TRANSITION_VIDEO_TO_PLAYBACK_MS = 600 // fade duration from transition video end to playback view
-const TRANSITION_VIDEO_PLAYBACK_RATE = 0.97 // slightly slower for smoother scroll recording playback
+const TRANSITION_VIDEO_PLAYBACK_RATE = 1 // 1x for smoother frame pacing (avoid fractional-rate stutter)
 // Backend proxy: Vite rewrites /api → http://127.0.0.1:8000
 const API_BASE = '/api'
 // Endpoints: POST /jobs, GET /jobs/:id, GET /jobs/:id/input-video, GET /jobs/:id/annotated-video
@@ -52,6 +65,16 @@ export default function App() {
   const [showResultView, setShowResultView] = useState(false)
   const [jobError, setJobError] = useState(null)
   const [annotatedVideoBlobUrl, setAnnotatedVideoBlobUrl] = useState(null)
+  const [resultActionsOpen, setResultActionsOpen] = useState(false)
+  const [resultActionPending, setResultActionPending] = useState(null)
+  const [showApprovePage, setShowApprovePage] = useState(false)
+  const [approveJobId, setApproveJobId] = useState(null)
+  const [reportData, setReportData] = useState({ metrics: null, confidence: null, timeline: null, worldGt: null })
+  const [reportMetricsRun, setReportMetricsRun] = useState('baseline')
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportError, setReportError] = useState(null)
+  const [jsonTab, setJsonTab] = useState('metrics')
+  const [resultVideoPlaying, setResultVideoPlaying] = useState(true)
   const videoRef = useRef(null)
   const playbackVideoRef = useRef(null)
   const playbackBlobUrlRef = useRef(null)
@@ -66,6 +89,17 @@ export default function App() {
   const reverseRafRef = useRef(null)
   const statusPollIntervalRef = useRef(null)
   const resultVideoRef = useRef(null)
+  const resultViewRef = useRef(null)
+
+  // PiP layout for result view: position (left, top) and width; height = width * 9/16. Draggable, resizable, snaps to edges.
+  const PIP_MIN_WIDTH = 160
+  const PIP_MAX_WIDTH_RATIO = 0.4
+  const PIP_MARGIN = 16
+  const [pipLayout, setPipLayout] = useState(null)
+  const pipDragRef = useRef({ dragging: false, startX: 0, startY: 0, startLeft: 0, startTop: 0 })
+  const pipResizeRef = useRef({ resizing: false, startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0, corner: 'br' })
+  const pipLayoutRef = useRef(null)
+  pipLayoutRef.current = pipLayout
 
   const hadFilesRef = useRef(0)
   hadFilesRef.current = droppedFiles.length
@@ -319,12 +353,28 @@ export default function App() {
 
   const effectivePlaybackSrc = playbackUrl?.startsWith('/api') ? playbackBlobUrl : playbackUrl
 
+  // Preload video2 when app mounts for smooth playback (avoid buffering stutter)
+  useEffect(() => {
+    const link = document.createElement('link')
+    link.rel = 'preload'
+    link.as = 'video'
+    link.href = TRANSITION_VIDEO_PATH
+    document.head.appendChild(link)
+    return () => link.remove()
+  }, [])
+
   useEffect(() => {
     if (showTransitionVideo && transitionVideoRef.current) {
       const v = transitionVideoRef.current
       v.currentTime = 0
       v.playbackRate = TRANSITION_VIDEO_PLAYBACK_RATE
-      v.play().catch(() => {})
+      // Wait for enough data to avoid mid-play stutter; then play
+      const playWhenReady = () => {
+        v.playbackRate = TRANSITION_VIDEO_PLAYBACK_RATE
+        v.play().catch(() => {})
+      }
+      if (v.readyState >= 3) playWhenReady()
+      else v.addEventListener('canplaythrough', playWhenReady, { once: true })
     }
   }, [showTransitionVideo])
 
@@ -421,6 +471,8 @@ export default function App() {
     setInputVideoUrl(null)
     setJobError(null)
     setAnnotatedVideoBlobUrl(null)
+    setResultActionsOpen(false)
+    setResultActionPending(null)
     if (playbackBlobUrlRef.current) {
       URL.revokeObjectURL(playbackBlobUrlRef.current)
       playbackBlobUrlRef.current = null
@@ -475,17 +527,525 @@ export default function App() {
     }
   }, [showResultView, resultVideoUrl])
 
+  // Default PiP position (bottom-right) when entering result view
+  useEffect(() => {
+    if (!showResultView) return
+    const w = window.innerWidth
+    const h = window.innerHeight
+    const width = 240
+    const height = Math.round((width * 9) / 16)
+    setPipLayout({
+      left: w - width - PIP_MARGIN,
+      top: h - height - PIP_MARGIN,
+      width,
+    })
+  }, [showResultView])
+
+  // PiP drag: move and snap to edges on release
+  const getContainerRect = useCallback(() => {
+    const el = resultViewRef.current
+    if (el) return el.getBoundingClientRect()
+    return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }
+  }, [])
+
+  const snapPipToEdges = useCallback(() => {
+    const layout = pipLayoutRef.current
+    if (!layout) return
+    const rect = getContainerRect()
+    const height = (layout.width * 9) / 16
+    const halfW = rect.width / 2
+    const halfH = rect.height / 2
+    const centerX = layout.left + layout.width / 2
+    const centerY = layout.top + height / 2
+    let left = layout.left
+    let top = layout.top
+    if (centerX < halfW) left = PIP_MARGIN
+    else left = rect.width - layout.width - PIP_MARGIN
+    if (centerY < halfH) top = PIP_MARGIN
+    else top = rect.height - height - PIP_MARGIN
+    setPipLayout((prev) => (prev ? { ...prev, left, top } : null))
+  }, [getContainerRect])
+
+  const handlePipMouseDown = useCallback(
+    (e) => {
+      if (e.target.closest('.result-view__pip-resize')) return
+      e.preventDefault()
+      pipDragRef.current = {
+        dragging: true,
+        startX: e.clientX,
+        startY: e.clientY,
+        startLeft: pipLayout.left,
+        startTop: pipLayout.top,
+      }
+    },
+    [pipLayout?.left, pipLayout?.top]
+  )
+
+  const handlePipResizeDown = useCallback(
+    (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const layout = pipLayoutRef.current
+      if (!layout) return
+      const rect = getContainerRect()
+      const h = (layout.width * 9) / 16
+      const rightGap = rect.width - (layout.left + layout.width)
+      const leftGap = layout.left
+      const bottomGap = rect.height - (layout.top + h)
+      const topGap = layout.top
+      const handleOnLeft = rightGap < leftGap
+      const handleOnTop = bottomGap < topGap
+      const corner = handleOnLeft ? (handleOnTop ? 'tl' : 'bl') : (handleOnTop ? 'tr' : 'br')
+      pipResizeRef.current = {
+        resizing: true,
+        startX: e.clientX,
+        startY: e.clientY,
+        startLeft: layout.left,
+        startTop: layout.top,
+        startWidth: layout.width,
+        startHeight: h,
+        corner,
+      }
+    },
+    [getContainerRect]
+  )
+
+  useEffect(() => {
+    if (!showResultView || !pipLayout) return
+    const onMove = (e) => {
+      const rect = getContainerRect()
+      const height = (pipLayout.width * 9) / 16
+      if (pipDragRef.current.dragging) {
+        const dx = e.clientX - pipDragRef.current.startX
+        const dy = e.clientY - pipDragRef.current.startY
+        let left = pipDragRef.current.startLeft + dx
+        let top = pipDragRef.current.startTop + dy
+        left = Math.max(PIP_MARGIN, Math.min(rect.width - pipLayout.width - PIP_MARGIN, left))
+        top = Math.max(PIP_MARGIN, Math.min(rect.height - height - PIP_MARGIN, top))
+        setPipLayout((prev) => ({ ...prev, left, top }))
+      }
+      if (pipResizeRef.current.resizing) {
+        const { startX, startLeft, startTop, startWidth, startHeight, corner } = pipResizeRef.current
+        const dx = e.clientX - startX
+        const minW = PIP_MIN_WIDTH
+        const maxW = Math.floor(rect.width * PIP_MAX_WIDTH_RATIO)
+        let width = (corner === 'br' || corner === 'tr') ? startWidth + dx : startWidth - dx
+        width = Math.max(minW, Math.min(maxW, width))
+        const height2 = (width * 9) / 16
+        let left = startLeft
+        let top = startTop
+        if (corner === 'br') {
+          left = startLeft
+          top = startTop
+          if (left + width > rect.width - PIP_MARGIN) left = rect.width - width - PIP_MARGIN
+          if (top + height2 > rect.height - PIP_MARGIN) top = rect.height - height2 - PIP_MARGIN
+        } else if (corner === 'bl') {
+          left = startLeft + startWidth - width
+          top = startTop
+          if (left < PIP_MARGIN) left = PIP_MARGIN
+          if (top + height2 > rect.height - PIP_MARGIN) top = rect.height - height2 - PIP_MARGIN
+        } else if (corner === 'tr') {
+          left = startLeft
+          top = startTop + startHeight - height2
+          if (left + width > rect.width - PIP_MARGIN) left = rect.width - width - PIP_MARGIN
+          if (top < PIP_MARGIN) top = PIP_MARGIN
+        } else {
+          left = startLeft + startWidth - width
+          top = startTop + startHeight - height2
+          if (left < PIP_MARGIN) left = PIP_MARGIN
+          if (top < PIP_MARGIN) top = PIP_MARGIN
+        }
+        setPipLayout((prev) => (prev ? { ...prev, left, top, width } : null))
+      }
+    }
+    const onUp = () => {
+      if (pipDragRef.current.dragging) {
+        pipDragRef.current.dragging = false
+        snapPipToEdges()
+      }
+      if (pipResizeRef.current.resizing) pipResizeRef.current.resizing = false
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [showResultView, pipLayout, getContainerRect, snapPipToEdges])
+
+  // Resize handle corner: opposite to the screen edge the PiP is closest to
+  const pipResizeCorner = (() => {
+    if (!pipLayout || !resultViewRef.current) return 'br'
+    const rect = getContainerRect()
+    const w = pipLayout.width
+    const h = (w * 9) / 16
+    const leftGap = pipLayout.left
+    const rightGap = rect.width - (pipLayout.left + w)
+    const topGap = pipLayout.top
+    const bottomGap = rect.height - (pipLayout.top + h)
+    const handleOnLeft = rightGap < leftGap
+    const handleOnTop = bottomGap < topGap
+    return handleOnLeft ? (handleOnTop ? 'tl' : 'bl') : (handleOnTop ? 'tr' : 'br')
+  })()
+
   // Main video must always use annotated-video URL so it never shows input (no blob mix-up)
   const mainVideoSrc = resultVideoUrl || null
 
+  const handleResultAction = useCallback(
+    async (action) => {
+      setResultActionsOpen(false)
+      if (!jobId) return
+      if (action === 'approve') {
+        setApproveJobId(jobId)
+        setShowApprovePage(true)
+        setResultActionPending(null)
+        return
+      }
+      if (action === 'reject') {
+        setResultActionPending('reject')
+        setTimeout(() => setResultActionPending(null), 1500)
+        return
+      }
+      if (action === 'correction') {
+        setResultActionPending('correction')
+        try {
+          await fetch(`${API_BASE}/jobs/${jobId}/corrections`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ corrections: [] }),
+          })
+          const r = await fetch(`${API_BASE}/jobs/${jobId}/rerun`, { method: 'POST' })
+          if (r.ok) {
+            setResultActionPending('rerunning')
+            setShowResultView(false)
+          } else {
+            setResultActionPending(null)
+          }
+        } catch (e) {
+          console.warn('[RoboSight] Correction/rerun failed', e)
+          setResultActionPending(null)
+        }
+      }
+    },
+    [jobId]
+  )
+
+  // Poll job when rerunning; go back to playback view, then show result view with new annotated video when completed
+  useEffect(() => {
+    if (resultActionPending !== 'rerunning' || !jobId) return
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}`)
+        const data = await res.json()
+        setJobStatus(data)
+        if (data.status === 'completed') {
+          setResultActionPending(null)
+          setAnnotatedVideoBlobUrl(null)
+          if (annotatedBlobUrlRef.current) {
+            URL.revokeObjectURL(annotatedBlobUrlRef.current)
+            annotatedBlobUrlRef.current = null
+          }
+          const b = await fetch(`${API_BASE}/jobs/${jobId}/annotated-video`)
+          if (b.ok) {
+            const blob = await b.blob()
+            const url = URL.createObjectURL(blob)
+            annotatedBlobUrlRef.current = url
+            setAnnotatedVideoBlobUrl(url)
+          }
+          setShowResultView(true)
+        } else if (data.status === 'failed') {
+          setResultActionPending(null)
+        }
+      } catch (_) {}
+    }, 2000)
+    return () => clearInterval(poll)
+  }, [resultActionPending, jobId])
+
+  // Load report data when Approve page is shown; prefer calibrated metrics (from reanalysis) when available
+  useEffect(() => {
+    const id = showApprovePage ? approveJobId || jobId : null
+    if (!id) {
+      setReportData({ metrics: null, confidence: null, timeline: null, worldGt: null })
+      setReportMetricsRun('baseline')
+      return
+    }
+    setReportLoading(true)
+    setReportError(null)
+    const base = `${API_BASE}/jobs/${id}`
+    const metricsPromise = fetch(`${base}/metrics?run=calibrated`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cal) => cal != null ? { metrics: cal, run: 'calibrated' } : fetch(`${base}/metrics?run=baseline`).then((r) => (r.ok ? r.json() : null)).then((m) => ({ metrics: m, run: 'baseline' })))
+    Promise.all([
+      metricsPromise,
+      fetch(`${base}/confidence-report`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/timeline`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/results`).then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([metricsResult, confidence, timeline, worldGt]) => {
+        setReportMetricsRun(metricsResult.run)
+        setReportData({ metrics: metricsResult.metrics, confidence, timeline, worldGt })
+        setReportError(null)
+      })
+      .catch((e) => {
+        setReportError(e.message || 'Failed to load report data')
+        setReportData({ metrics: null, confidence: null, timeline: null, worldGt: null })
+        setReportMetricsRun('baseline')
+      })
+      .finally(() => setReportLoading(false))
+  }, [showApprovePage, approveJobId, jobId])
+
+  // URL: ?view=approve&job=xxx opens reports page for that job
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('view') === 'approve') {
+      const id = params.get('job')
+      if (id) {
+        setApproveJobId(id)
+        setShowApprovePage(true)
+        setShowPlaybackView(true)
+        setShowResultView(false)
+      }
+    }
+  }, [])
+
+  const reportJobId = showApprovePage ? (approveJobId || jobId) : null
+  const reportVideoUrl = reportJobId ? `${API_BASE}/jobs/${reportJobId}/annotated-video` : null
+
   return (
     <div
-      className={`page ${showPlaybackView || showResultView || transitionFadingOut ? 'page--playback' : ''}`}
+      className={`page ${showPlaybackView || showResultView || showApprovePage || transitionFadingOut ? 'page--playback' : ''}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
+      {/* Approve / Reports page: annotated video top-left, graphs from job JSON */}
+      {showApprovePage && reportJobId && (
+        <div className="reports-page reports-page--vision-pro">
+          <button
+            type="button"
+            className="result-view__back result-view__back--vision-pro reports-page__back"
+            onClick={() => { setShowApprovePage(false); setApproveJobId(null) }}
+          >
+            Back
+          </button>
+          <div className="reports-page__layout">
+            <aside className="reports-page__left">
+              <div className="reports-page__video-wrap">
+                <div className="reports-page__video-label">Annotated view</div>
+                {reportVideoUrl && (
+                  <video
+                    key={`report-video-${reportJobId}`}
+                    className="reports-page__video"
+                    src={reportVideoUrl}
+                    muted
+                    playsInline
+                    loop
+                    preload="auto"
+                    onLoadedData={(e) => e.target.play().catch(() => {})}
+                  />
+                )}
+              </div>
+              <div className="reports-page__json-wrap">
+                <h3 className="reports-page__card-title">Raw JSON</h3>
+                <div className="reports-page__json-tabs">
+                  {['metrics', 'confidence', 'timeline', 'world_gt'].map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`reports-page__json-tab ${jsonTab === key ? 'reports-page__json-tab--active' : ''}`}
+                      onClick={() => setJsonTab(key)}
+                    >
+                      {key.replace('_', ' ')}
+                    </button>
+                  ))}
+                </div>
+                <pre className="reports-page__json-pre">
+                  {(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab]) != null
+                    ? JSON.stringify(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab], null, 2)
+                    : '—'}
+                </pre>
+              </div>
+            </aside>
+            <div className="reports-page__right">
+              <div className="reports-page__graphs">
+                {reportLoading && (
+                  <div className="reports-page__loading" aria-live="polite">
+                    <div className="reports-page__loading-bar" />
+                    <div className="reports-page__loading-shimmer">
+                      <div className="reports-page__loading-shimmer-inner" />
+                    </div>
+                    <span className="reports-page__loading-text">Loading report data…</span>
+                  </div>
+                )}
+                {reportError && (
+                  <div className="reports-page__error">{reportError}</div>
+                )}
+                {!reportLoading && !reportError && reportData.metrics && (
+                  <>
+                    <div className="reports-page__card reports-page__card--metrics">
+                      <h3 className="reports-page__card-title">Metrics</h3>
+                      <div className="reports-page__metrics-grid">
+                        <div className="reports-page__metric">
+                          <span className="reports-page__metric-value">{((reportData.metrics.event_precision ?? 0) * 100).toFixed(1)}%</span>
+                          <span className="reports-page__metric-label">Precision</span>
+                        </div>
+                        <div className="reports-page__metric">
+                          <span className="reports-page__metric-value">{((reportData.metrics.event_recall ?? 0) * 100).toFixed(1)}%</span>
+                          <span className="reports-page__metric-label">Recall</span>
+                        </div>
+                        <div className="reports-page__metric">
+                          <span className="reports-page__metric-value">{(reportData.metrics.avg_boundary_error ?? 0).toFixed(2)}s</span>
+                          <span className="reports-page__metric-label">Boundary error</span>
+                        </div>
+                        <div className="reports-page__metric">
+                          <span className="reports-page__metric-value">{((reportData.metrics.review_percentage ?? 0) * 100).toFixed(1)}%</span>
+                          <span className="reports-page__metric-label">Review %</span>
+                        </div>
+                        <div className="reports-page__metric">
+                          <span className="reports-page__metric-value">{Math.round(reportData.metrics.labeling_time_saved_estimate ?? 0)}</span>
+                          <span className="reports-page__metric-label">Time saved (est.)</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="reports-page__card">
+                      <h3 className="reports-page__card-title">Precision & Recall</h3>
+                      <div className="reports-page__chart-wrap">
+                        <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={[
+                          { name: 'Precision', value: (reportData.metrics.event_precision ?? 0) * 100, fill: '#007AFF' },
+                          { name: 'Recall', value: (reportData.metrics.event_recall ?? 0) * 100, fill: '#5856D6' },
+                        ]}
+                        margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v) => `${Number(v).toFixed(1)}%`} />
+                        <Bar dataKey="value" fill="#007AFF" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {!reportLoading && !reportError && reportData.confidence && (
+                  <div className="reports-page__card">
+                    <h3 className="reports-page__card-title">Confidence</h3>
+                    <div className="reports-page__confidence-row">
+                      <div className="reports-page__chart-wrap">
+                        <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={(() => {
+                            const high = reportData.confidence.high_confidence_count ?? 0
+                            const low = reportData.confidence.low_confidence_count ?? 0
+                            if (high === 0 && low === 0) return [{ name: 'No events', value: 1, color: '#E5E5EA' }]
+                            return [
+                              { name: 'High confidence', value: high, color: '#34C759' },
+                              { name: 'Low confidence', value: low, color: '#FF3B30' },
+                            ]
+                          })()}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={80}
+                          paddingAngle={2}
+                          dataKey="value"
+                          label={({ name, value }) => (value > 0 ? `${name}: ${value}` : null)}
+                        >
+                          {(() => {
+                            const high = reportData.confidence.high_confidence_count ?? 0
+                            const low = reportData.confidence.low_confidence_count ?? 0
+                            const arr = high === 0 && low === 0
+                              ? [{ color: '#E5E5EA' }]
+                              : [{ color: '#34C759' }, { color: '#FF3B30' }]
+                            return arr.map((entry, i) => <Cell key={i} fill={entry.color} />)
+                          })()}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="reports-page__confidence-summary">
+                        <p>Overall: {((reportData.confidence.overall_confidence ?? 0) * 100).toFixed(0)}%</p>
+                        <p>Total events: {reportData.confidence.total_events ?? 0}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!reportLoading && !reportError && reportData.worldGt?.objects?.length > 0 && (
+                  <div className="reports-page__card">
+                    <h3 className="reports-page__card-title">Object confidence</h3>
+                    <div className="reports-page__chart-wrap">
+                      <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={(reportData.worldGt.objects || []).map((o) => ({ name: o.label || o.id, value: Number(((o.confidence ?? 0) * 100).toFixed(1)) }))}
+                      layout="vertical"
+                      margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} />
+                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
+                      <Tooltip formatter={(v) => `${v}%`} />
+                      <Bar dataKey="value" fill="#007AFF" radius={[0, 6, 6, 0]} />
+                    </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+                {!reportLoading && !reportError && reportData.timeline?.length > 0 && (
+                  <div className="reports-page__card">
+                    <h3 className="reports-page__card-title">Events over time</h3>
+                    <div className="reports-page__chart-wrap">
+                      <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={reportData.timeline.map((e) => ({ time: e.start_time ?? 0, count: 1 }))}
+                      margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                      <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="#5856D6" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+                {!reportLoading && !reportError && reportData.worldGt?.video && (
+                  <div className="reports-page__card">
+                    <h3 className="reports-page__card-title">Video info</h3>
+                    <div className="reports-page__video-info">
+                      <p>Duration: {(reportData.worldGt.video.duration_seconds ?? 0).toFixed(1)}s</p>
+                      <p>FPS: {(reportData.worldGt.video.fps ?? 0).toFixed(1)}</p>
+                      <p>Resolution: {reportData.worldGt.video.resolution?.join(' × ') || '—'}</p>
+                    </div>
+                  </div>
+                )}
+                {!reportLoading && !reportError && reportMetricsRun === 'calibrated' && reportData.metrics && (
+                  <div className="reports-page__card reports-page__card--reanalysis" style={{ gridColumn: '1 / -1' }}>
+                    <h3 className="reports-page__card-title">Precision & Recall from reanalysis</h3>
+                    <p className="reports-page__reanalysis-desc">Metrics after correction and video reanalysis.</p>
+                    <div className="reports-page__reanalysis-metrics">
+                      <div className="reports-page__metric">
+                        <span className="reports-page__metric-value">{((reportData.metrics.event_precision ?? 0) * 100).toFixed(1)}%</span>
+                        <span className="reports-page__metric-label">Precision</span>
+                      </div>
+                      <div className="reports-page__metric">
+                        <span className="reports-page__metric-value">{((reportData.metrics.event_recall ?? 0) * 100).toFixed(1)}%</span>
+                        <span className="reports-page__metric-label">Recall</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Black underlay during video2 fade-out: prevents side-faced Vision Pro / white bg from showing through */}
       {transitionFadingOut && (
         <div className="transition-black-underlay" aria-hidden="true" />
@@ -507,8 +1067,8 @@ export default function App() {
         </div>
       )}
       {/* Result view: Google Meet layout — annotated video from backend job as main stage, original as PiP */}
-      {showResultView && resultVideoUrl && (
-        <div className="result-view result-view--meet">
+      {showResultView && !showApprovePage && resultVideoUrl && (
+        <div ref={resultViewRef} className="result-view result-view--vision-pro">
           {/* Main stage: annotated video from /jobs/:id/annotated-video (Meet “main speaker”) */}
           <div className="result-view__main">
             {mainVideoSrc ? (
@@ -524,9 +1084,11 @@ export default function App() {
                 preload="auto"
                 disablePictureInPicture
                 disableRemotePlayback
-                onLoadedData={(e) => e.target.play().catch(() => {})}
-                onCanPlay={(e) => e.target.play().catch(() => {})}
-              onError={(e) => console.warn('[RoboSight] Annotated video failed to load', e.target?.error)}
+                onLoadedData={(e) => { e.target.play().catch(() => {}); setResultVideoPlaying(true) }}
+                onCanPlay={(e) => { e.target.play().catch(() => {}); setResultVideoPlaying(true) }}
+                onPlay={() => setResultVideoPlaying(true)}
+                onPause={() => setResultVideoPlaying(false)}
+                onError={(e) => console.warn('[RoboSight] Annotated video failed to load', e.target?.error)}
               />
             ) : (
               <div className="result-view__loading">
@@ -535,9 +1097,44 @@ export default function App() {
             )}
             <div className="result-view__main-label">Annotated view</div>
           </div>
-          {/* PiP: original input video (bottom-right like Google Meet) */}
-          {effectivePlaybackSrc && (
-            <div className="result-view__pip" aria-label="Original video">
+          <button
+            type="button"
+            className="result-view__play-pause result-view__actions-btn"
+            aria-label={resultVideoPlaying ? 'Pause' : 'Play'}
+            onClick={() => {
+              const v = resultVideoRef.current
+              if (!v) return
+              if (resultVideoPlaying) {
+                v.pause()
+                setResultVideoPlaying(false)
+              } else {
+                v.play().catch(() => {})
+                setResultVideoPlaying(true)
+              }
+            }}
+          >
+            {resultVideoPlaying ? (
+              <span className="result-view__play-pause-icon result-view__play-pause-icon--pause" aria-hidden>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+              </span>
+            ) : (
+              <span className="result-view__play-pause-icon result-view__play-pause-icon--play" aria-hidden>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              </span>
+            )}
+          </button>
+          {effectivePlaybackSrc && pipLayout && (
+            <div
+              className="result-view__pip"
+              aria-label="Original video"
+              style={{
+                left: pipLayout.left,
+                top: pipLayout.top,
+                width: pipLayout.width,
+                height: (pipLayout.width * 9) / 16,
+              }}
+              onMouseDown={handlePipMouseDown}
+            >
               <video
                 className="result-view__pip-video"
                 src={effectivePlaybackSrc}
@@ -552,15 +1149,44 @@ export default function App() {
                 onLoadedData={(e) => e.target.play().catch(() => {})}
               />
               <span className="result-view__pip-label">Original</span>
+              <span
+                className={`result-view__pip-resize result-view__pip-resize--${pipResizeCorner}`}
+                aria-label="Resize"
+                onMouseDown={handlePipResizeDown}
+              />
             </div>
           )}
-          {/* Top-left: Leave call (Meet style) */}
-          <button type="button" className="result-view__back" onClick={handleBackFromResult}>
+          <button type="button" className="result-view__back result-view__back--vision-pro" onClick={handleBackFromResult}>
             Leave
           </button>
-          {/* Bottom bar: Meet-style control strip */}
-          <div className="result-view__bar">
-            <span className="result-view__bar-title">RoboSight — Annotated result</span>
+          <div className="result-view__actions-wrap">
+            {resultActionPending && (
+              <span className="result-view__action-status" aria-live="polite">
+                {resultActionPending === 'rerunning' ? 'Rerunning…' : resultActionPending === 'correction' ? 'Starting…' : resultActionPending === 'approve' ? 'Approved' : 'Rejected'}
+              </span>
+            )}
+            <div className="result-view__actions">
+              <button
+                type="button"
+                className="result-view__actions-btn"
+                aria-expanded={resultActionsOpen}
+                aria-haspopup="true"
+                aria-label="Result actions"
+                onClick={() => setResultActionsOpen((o) => !o)}
+              >
+                <span className="result-view__actions-btn-dot" />
+              </button>
+              {resultActionsOpen && (
+                <>
+                  <div className="result-view__actions-backdrop" onClick={() => setResultActionsOpen(false)} aria-hidden="true" />
+                  <div className="result-view__actions-dropdown" role="menu">
+                    <button type="button" role="menuitem" className="result-view__actions-item" onClick={() => handleResultAction('approve')}>Approve</button>
+                    <button type="button" role="menuitem" className="result-view__actions-item" onClick={() => handleResultAction('correction')}>Correction</button>
+                    <button type="button" role="menuitem" className="result-view__actions-item" onClick={() => handleResultAction('reject')}>Reject</button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -575,8 +1201,13 @@ export default function App() {
           )}
           <div className="playback-view__headset">
             <div className="playback-view__screen">
-              {/* AI / game scanner style overlay when input video is playing (Satisfactory-like) */}
-              {effectivePlaybackSrc && !playbackEntry?.error && (
+              {/* During vision analysis: wave animation (Apple Intelligence colors) bottom to top. Otherwise: scanner. */}
+              {effectivePlaybackSrc && !playbackEntry?.error && jobId && jobStatus?.status !== 'completed' && jobStatus?.status !== 'failed' && (
+                <div className="playback-view__apple-intel" aria-hidden="true">
+                  <div className="playback-view__apple-intel__wave" />
+                </div>
+              )}
+              {effectivePlaybackSrc && !playbackEntry?.error && (!jobId || jobStatus?.status === 'completed' || jobStatus?.status === 'failed') && (
                 <div className="playback-view__scanner" aria-hidden="true">
                   <div className="playback-view__scanner__grid" />
                   <div className="playback-view__scanner__line playback-view__scanner__line--1" />
@@ -634,7 +1265,9 @@ export default function App() {
           </div>
           {jobId && jobStatus?.status !== 'completed' && jobStatus?.status !== 'failed' && (
             <div className="vision-analysis-label" aria-live="polite">
-              Vision analysis… {jobStatus != null ? `${Math.round((jobStatus.progress ?? 0) * 100)}%` : 'starting'}
+              {resultActionPending === 'rerunning' || jobStatus?.status === 'rerunning'
+                ? `Video analysis (reanalyzing)… ${jobStatus != null ? `${Math.round((jobStatus.progress ?? 0) * 100)}%` : 'starting'}`
+                : `Vision analysis… ${jobStatus != null ? `${Math.round((jobStatus.progress ?? 0) * 100)}%` : 'starting'}`}
             </div>
           )}
         </div>
