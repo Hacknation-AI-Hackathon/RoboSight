@@ -1,3 +1,56 @@
+/* Transition video layer: full-screen video2 after processing, before playback view */
+.transition-video-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+
+.transition-video-layer--fade-out {
+  opacity: 0;
+  transform: scale(1.08);
+  pointer-events: none;
+}
+
+/* Black underlay during video2 fade-out: sits below transition video so we see black, not vision pro */
+.transition-black-underlay {
+  position: fixed;
+  inset: 0;
+  z-index: 14;
+  background: #000;
+}
+
+.transition-video-layer__video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+  contain: layout paint;
+}
+
+/* Playback view zoom-in transition (matches back-vision pro scale) */
+.playback-view--zoom-in {
+  animation: playback-view-zoom-in 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes playback-view-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Container: fills viewport, keeps design proportions */
 .page {
   width: 100vw;
@@ -6,6 +59,12 @@
   position: relative;
   background: #F5F5F7;
   overflow: hidden;
+  transition: background 0.4s ease;
+}
+
+/* Black background during playback so zoom-in doesn't show light border */
+.page--playback {
+  background: #000;
 }
 
 /* Vision Pro wrapper – positions video + Apple Intelligence orb */
@@ -287,6 +346,20 @@
   object-fit: cover;
 }
 
+.uploaded-file--error .uploaded-file__preview {
+  background: rgba(255, 59, 48, 0.12);
+}
+.uploaded-file__error {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: rgb(255, 59, 48);
+}
+
 .uploaded-file__placeholder {
   width: 100%;
   height: 100%;
@@ -347,9 +420,11 @@
   z-index: 10;
   background: #000;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  gap: 24px;
 }
 
 .playback-view__headset {
@@ -413,6 +488,28 @@
   transform: scale(0.76);
 }
 
+/* Unsupported codec / playback error in headset */
+.playback-view__error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+.playback-view__error-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+.playback-view__error-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 /* Visor gradient: bright white center fading to dark gray/black edges, like looking through a lens */
 .playback-view__gradient {
   position: absolute;
@@ -436,6 +533,175 @@
   mask-position: center;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
+}
+
+/* Video picker: choose which video plays in the headset */
+.playback-view__picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  padding: 0 16px 24px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.playback-view__thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  min-width: 80px;
+}
+.playback-view__thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.playback-view__thumb--active {
+  border-color: rgba(0, 122, 255, 0.8);
+  background: rgba(0, 122, 255, 0.15);
+}
+.playback-view__thumb-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.playback-view__thumb video {
+  width: 64px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+.playback-view__thumb-error {
+  width: 64px;
+  height: 40px;
+  border-radius: 6px;
+  background: rgba(255, 59, 48, 0.2);
+  color: rgb(255, 59, 48);
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Vision analysis label: shown while polling job status (back-vision pro + video screen) */
+.vision-analysis-label {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  letter-spacing: 0.02em;
+  z-index: 5;
+}
+
+/* Job error banner in Vision analysis view */
+.playback-view__job-error {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(255, 59, 48, 0.15);
+  border: 1px solid rgba(255, 59, 48, 0.4);
+  border-radius: 12px;
+  z-index: 20;
+}
+.playback-view__job-error .result-view__back {
+  margin: 0;
+}
+
+/* Result view: full-screen backend video with floating original on the right */
+.result-view {
+  position: fixed;
+  inset: 0;
+  z-index: 16;
+  background: #000;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.result-view__main-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.result-view__floating-original {
+  position: absolute;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+  width: min(280px, 28vw);
+  aspect-ratio: 16 / 10;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+}
+
+.result-view__floating-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.result-view__floating-video {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.result-view__back {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  cursor: pointer;
+  z-index: 10;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.result-view__back:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 
