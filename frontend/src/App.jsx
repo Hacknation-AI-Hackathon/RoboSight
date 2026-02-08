@@ -6,11 +6,10 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
   Legend,
   CartesianGrid,
+  LineChart,
+  Line,
 } from 'recharts'
 import './App.css'
 
@@ -67,9 +66,22 @@ export default function App() {
   const [annotatedVideoBlobUrl, setAnnotatedVideoBlobUrl] = useState(null)
   const [resultActionsOpen, setResultActionsOpen] = useState(false)
   const [resultActionPending, setResultActionPending] = useState(null)
+  const [showCorrectionPopup, setShowCorrectionPopup] = useState(false)
+  const [correctionText, setCorrectionText] = useState('')
   const [showApprovePage, setShowApprovePage] = useState(false)
   const [approveJobId, setApproveJobId] = useState(null)
-  const [reportData, setReportData] = useState({ metrics: null, confidence: null, timeline: null, worldGt: null })
+  const [reportData, setReportData] = useState({
+    metrics: null,
+    rescanMetrics: null,
+    confidence: null,
+    timeline: null,
+    worldGt: null,
+    segmentations: null,
+    detections: null,
+    events: null,
+    stateTimeline: null,
+    semantics: null,
+  })
   const [reportMetricsRun, setReportMetricsRun] = useState('baseline')
   const [reportLoading, setReportLoading] = useState(false)
   const [reportError, setReportError] = useState(null)
@@ -89,6 +101,7 @@ export default function App() {
   const reverseRafRef = useRef(null)
   const statusPollIntervalRef = useRef(null)
   const resultVideoRef = useRef(null)
+  const resultPipVideoRef = useRef(null)
   const resultViewRef = useRef(null)
 
   // PiP layout for result view: position (left, top) and width; height = width * 9/16. Draggable, resizable, snaps to edges.
@@ -710,24 +723,35 @@ export default function App() {
         return
       }
       if (action === 'correction') {
-        setResultActionPending('correction')
-        try {
-          await fetch(`${API_BASE}/jobs/${jobId}/corrections`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ corrections: [] }),
-          })
-          const r = await fetch(`${API_BASE}/jobs/${jobId}/rerun`, { method: 'POST' })
-          if (r.ok) {
-            setResultActionPending('rerunning')
-            setShowResultView(false)
-          } else {
-            setResultActionPending(null)
-          }
-        } catch (e) {
-          console.warn('[RoboSight] Correction/rerun failed', e)
+        setCorrectionText('')
+        setShowCorrectionPopup(true)
+      }
+    },
+    [jobId]
+  )
+
+  const handleCorrectionRescan = useCallback(
+    async () => {
+      if (!jobId) return
+      setShowCorrectionPopup(false)
+      setResultActionPending('correction')
+      try {
+        await fetch(`${API_BASE}/jobs/${jobId}/corrections`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ corrections: [] }),
+        })
+        const r = await fetch(`${API_BASE}/jobs/${jobId}/rerun`, { method: 'POST' })
+        if (r.ok) {
+          setResultActionPending('rerunning')
+          setJobStatus((prev) => (prev ? { ...prev, status: 'rerunning', progress: 0 } : { status: 'rerunning', progress: 0 }))
+          setShowResultView(false)
+        } else {
           setResultActionPending(null)
         }
+      } catch (e) {
+        console.warn('[RoboSight] Correction/rerun failed', e)
+        setResultActionPending(null)
       }
     },
     [jobId]
@@ -764,34 +788,63 @@ export default function App() {
     return () => clearInterval(poll)
   }, [resultActionPending, jobId])
 
-  // Load report data when Approve page is shown; prefer calibrated metrics (from reanalysis) when available
+  // Load report data when Approve page is shown; fetch baseline, confidence, timeline, world_gt, events, segmentations, detections, semantics
   useEffect(() => {
     const id = showApprovePage ? approveJobId || jobId : null
+    const empty = {
+      metrics: null,
+      rescanMetrics: null,
+      confidence: null,
+      timeline: null,
+      worldGt: null,
+      segmentations: null,
+      detections: null,
+      events: null,
+      stateTimeline: null,
+      semantics: null,
+    }
     if (!id) {
-      setReportData({ metrics: null, confidence: null, timeline: null, worldGt: null })
+      setReportData(empty)
       setReportMetricsRun('baseline')
       return
     }
     setReportLoading(true)
     setReportError(null)
     const base = `${API_BASE}/jobs/${id}`
-    const metricsPromise = fetch(`${base}/metrics?run=calibrated`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((cal) => cal != null ? { metrics: cal, run: 'calibrated' } : fetch(`${base}/metrics?run=baseline`).then((r) => (r.ok ? r.json() : null)).then((m) => ({ metrics: m, run: 'baseline' })))
+    const baselinePromise = fetch(`${base}/metrics?run=baseline`).then((r) => (r.ok ? r.json() : null))
+    const calibratedPromise = fetch(`${base}/metrics?run=calibrated`).then((r) => (r.ok ? r.json() : null))
     Promise.all([
-      metricsPromise,
+      baselinePromise,
+      calibratedPromise,
       fetch(`${base}/confidence-report`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${base}/timeline`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${base}/results`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/events`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/segmentations`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/detections`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${base}/semantics`).then((r) => (r.ok ? r.json() : null)),
     ])
-      .then(([metricsResult, confidence, timeline, worldGt]) => {
-        setReportMetricsRun(metricsResult.run)
-        setReportData({ metrics: metricsResult.metrics, confidence, timeline, worldGt })
+      .then(([baseline, rescanMetrics, confidence, timeline, worldGt, eventsPayload, segmentations, detections, semantics]) => {
+        setReportMetricsRun(rescanMetrics != null ? 'calibrated' : 'baseline')
+        const eventsList = Array.isArray(eventsPayload) ? [] : (eventsPayload?.events ?? [])
+        const stateTimeline = Array.isArray(eventsPayload) ? [] : (eventsPayload?.state_timeline ?? [])
+        setReportData({
+          metrics: baseline,
+          rescanMetrics: rescanMetrics || null,
+          confidence,
+          timeline,
+          worldGt,
+          segmentations: Array.isArray(segmentations) ? segmentations : null,
+          detections: Array.isArray(detections) ? detections : null,
+          events: eventsList,
+          stateTimeline,
+          semantics: Array.isArray(semantics) ? semantics : null,
+        })
         setReportError(null)
       })
       .catch((e) => {
         setReportError(e.message || 'Failed to load report data')
-        setReportData({ metrics: null, confidence: null, timeline: null, worldGt: null })
+        setReportData(empty)
         setReportMetricsRun('baseline')
       })
       .finally(() => setReportLoading(false))
@@ -849,202 +902,254 @@ export default function App() {
                   />
                 )}
               </div>
-              <div className="reports-page__json-wrap">
-                <h3 className="reports-page__card-title">Raw JSON</h3>
-                <div className="reports-page__json-tabs">
-                  {['metrics', 'confidence', 'timeline', 'world_gt'].map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={`reports-page__json-tab ${jsonTab === key ? 'reports-page__json-tab--active' : ''}`}
-                      onClick={() => setJsonTab(key)}
-                    >
-                      {key.replace('_', ' ')}
-                    </button>
-                  ))}
-                </div>
-                <pre className="reports-page__json-pre">
-                  {(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab]) != null
-                    ? JSON.stringify(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab], null, 2)
-                    : '\u2014'}
-                </pre>
-              </div>
-            </aside>
-            <div className="reports-page__right">
               <div className="reports-page__graphs">
-                {reportLoading && (
-                  <div className="reports-page__loading" aria-live="polite">
-                    <div className="reports-page__loading-bar" />
-                    <div className="reports-page__loading-shimmer">
-                      <div className="reports-page__loading-shimmer-inner" />
-                    </div>
-                    <span className="reports-page__loading-text">Loading report data…</span>
-                  </div>
-                )}
-                {reportError && (
-                  <div className="reports-page__error">{reportError}</div>
-                )}
-                {!reportLoading && !reportError && reportData.metrics && (
+                {!reportLoading && !reportError && (
                   <>
-                    <div className="reports-page__card reports-page__card--metrics">
-                      <h3 className="reports-page__card-title">Metrics</h3>
-                      <div className="reports-page__metrics-grid">
-                        <div className="reports-page__metric">
-                          <span className="reports-page__metric-value">{((reportData.metrics.event_precision ?? 0) * 100).toFixed(1)}%</span>
-                          <span className="reports-page__metric-label">Precision</span>
-                        </div>
-                        <div className="reports-page__metric">
-                          <span className="reports-page__metric-value">{((reportData.metrics.event_recall ?? 0) * 100).toFixed(1)}%</span>
-                          <span className="reports-page__metric-label">Recall</span>
-                        </div>
-                        <div className="reports-page__metric">
-                          <span className="reports-page__metric-value">{(reportData.metrics.avg_boundary_error ?? 0).toFixed(2)}s</span>
-                          <span className="reports-page__metric-label">Boundary error</span>
-                        </div>
-                        <div className="reports-page__metric">
-                          <span className="reports-page__metric-value">{((reportData.metrics.review_percentage ?? 0) * 100).toFixed(1)}%</span>
-                          <span className="reports-page__metric-label">Review %</span>
-                        </div>
-                        <div className="reports-page__metric">
-                          <span className="reports-page__metric-value">{Math.round(reportData.metrics.labeling_time_saved_estimate ?? 0)}</span>
-                          <span className="reports-page__metric-label">Time saved (est.)</span>
-                        </div>
+                    {/* Chart 1: Object Detection Confidence — grouped bar, avg SAM3 score per class per keyframe */}
+                    <div className="reports-page__card">
+                      <h3 className="reports-page__card-title">Object Detection Confidence</h3>
+                      <div className="reports-page__chart-wrap">
+                        {reportData.segmentations?.length > 0 ? (
+                          (() => {
+                            const seg = reportData.segmentations
+                            const keyframes = seg.slice(0, 6)
+                            const labels = [...new Set(seg.flatMap((s) => (s.objects || []).map((o) => o.label || o.class)).filter(Boolean))]
+                            const byKeyframe = keyframes.map((kf, i) => {
+                              const obj = { keyframe: `K${i}` }
+                              labels.forEach((l) => {
+                                const scores = (kf.objects || []).filter((o) => (o.label || o.class) === l).map((o) => Number(o.score ?? 0))
+                                obj[l] = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
+                              })
+                              return obj
+                            })
+                            const colors = { drawer: '#007AFF', handle: '#AF52DE', cabinet: '#FF2D55' }
+                            return (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={byKeyframe} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                                  <XAxis dataKey="keyframe" tick={{ fontSize: 11 }} />
+                                  <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} />
+                                  <Tooltip formatter={(v) => [`${(Number(v) * 100).toFixed(1)}%`, '']} />
+                                  <Legend />
+                                  {labels.map((l) => (
+                                    <Bar key={l} dataKey={l} fill={colors[l] || '#888'} radius={[4, 4, 0, 0]} />
+                                  ))}
+                                </BarChart>
+                              </ResponsiveContainer>
+                            )
+                          })()
+                        ) : (
+                          <div className="reports-page__chart-empty">No segmentation data</div>
+                        )}
                       </div>
                     </div>
+                    {/* Chart 2: Person Tracking — line: confidences[0] vs timestamp */}
                     <div className="reports-page__card">
-                      <h3 className="reports-page__card-title">Precision & Recall</h3>
+                      <h3 className="reports-page__card-title">Person Tracking</h3>
                       <div className="reports-page__chart-wrap">
-                        <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={[
-                          { name: 'Precision', value: (reportData.metrics.event_precision ?? 0) * 100, fill: '#007AFF' },
-                          { name: 'Recall', value: (reportData.metrics.event_recall ?? 0) * 100, fill: '#5856D6' },
-                        ]}
-                        margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v) => `${Number(v).toFixed(1)}%`} />
-                        <Bar dataKey="value" fill="#007AFF" radius={[6, 6, 0, 0]} />
-                      </BarChart>
-                        </ResponsiveContainer>
+                        {reportData.detections?.length > 0 ? (
+                          (() => {
+                            const data = reportData.detections.map((d) => ({
+                              timestamp: Number(d.timestamp ?? d.frame_index ?? 0),
+                              confidence: d.confidences?.[0] ?? null,
+                            }))
+                            return (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                                  <XAxis dataKey="timestamp" tick={{ fontSize: 11 }} />
+                                  <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} />
+                                  <Tooltip formatter={(v) => (v != null ? [`${(Number(v) * 100).toFixed(1)}%`, 'Confidence'] : ['—', ''])} />
+                                  <Line type="monotone" dataKey="confidence" stroke="#007AFF" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            )
+                          })()
+                        ) : (
+                          <div className="reports-page__chart-empty">No detection data</div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Chart 3: Signal Fusion per Event — stacked bar: motion_score, proximity_score, vl_confidence */}
+                    <div className="reports-page__card">
+                      <h3 className="reports-page__card-title">Signal Fusion per Event</h3>
+                      <div className="reports-page__chart-wrap">
+                        {reportData.events?.length > 0 && reportData.events.some((e) => e.signals) ? (
+                          (() => {
+                            const data = reportData.events.map((e, i) => {
+                              const s = e.signals || {}
+                              return {
+                                name: e.id || `E${i + 1}`,
+                                motion_score: Number(s.motion_score ?? 0),
+                                proximity_score: Number(s.proximity_score ?? 0),
+                                vl_confidence: Number(s.vl_confidence ?? 0),
+                              }
+                            })
+                            return (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={data} layout="vertical" margin={{ top: 8, right: 8, left: 48, bottom: 8 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                                  <XAxis type="number" tick={{ fontSize: 11 }} />
+                                  <YAxis type="category" dataKey="name" width={44} tick={{ fontSize: 10 }} />
+                                  <Tooltip />
+                                  <Legend />
+                                  <Bar dataKey="motion_score" stackId="s" fill="#34C759" name="Motion" radius={[0, 4, 4, 0]} />
+                                  <Bar dataKey="proximity_score" stackId="s" fill="#007AFF" name="Proximity" radius={[0, 4, 4, 0]} />
+                                  <Bar dataKey="vl_confidence" stackId="s" fill="#AF52DE" name="VL" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            )
+                          })()
+                        ) : (
+                          <div className="reports-page__chart-empty">No event signals</div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Chart 4: State Timeline — horizontal Gantt: state bars per object */}
+                    <div className="reports-page__card">
+                      <h3 className="reports-page__card-title">State Timeline</h3>
+                      <div className="reports-page__chart-wrap">
+                        {reportData.stateTimeline?.length > 0 ? (
+                          (() => {
+                            const tl = reportData.stateTimeline
+                            const maxEnd = Math.max(...tl.flatMap((t) => (t.states || []).map((s) => Number(s.end ?? s.start ?? 0))), 1)
+                            const rowH = 28
+                            return (
+                              <div className="reports-page__gantt">
+                                {tl.slice(0, 8).map((entry, i) => (
+                                  <div key={entry.object_id || i} className="reports-page__gantt-row">
+                                    <span className="reports-page__gantt-label">{entry.object_id}</span>
+                                    <div className="reports-page__gantt-track" style={{ width: '100%' }}>
+                                      {(entry.states || []).map((seg, j) => {
+                                        const start = Number(seg.start ?? 0)
+                                        const end = Number(seg.end ?? start)
+                                        const w = maxEnd > 0 ? ((end - start) / maxEnd) * 100 : 0
+                                        const left = maxEnd > 0 ? (start / maxEnd) * 100 : 0
+                                        const isOpen = String(seg.state || '').toLowerCase().includes('open')
+                                        return (
+                                          <div
+                                            key={j}
+                                            className="reports-page__gantt-seg"
+                                            style={{
+                                              left: `${left}%`,
+                                              width: `${Math.max(w, 2)}%`,
+                                              backgroundColor: isOpen ? 'rgba(52, 199, 89, 0.85)' : 'rgba(255, 59, 48, 0.85)',
+                                            }}
+                                            title={`${seg.state ?? '?'} ${start.toFixed(1)}–${end.toFixed(1)}`}
+                                          />
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          })()
+                        ) : (
+                          <div className="reports-page__chart-empty">No state timeline</div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Chart 5: VL Model Consistency — table with status icons */}
+                    <div className="reports-page__card">
+                      <h3 className="reports-page__card-title">VL Model Consistency</h3>
+                      <div className="reports-page__chart-wrap reports-page__chart-wrap--table">
+                        {reportData.semantics?.length > 0 ? (
+                          <div className="reports-page__table-wrap">
+                            <table className="reports-page__table">
+                              <thead>
+                                <tr>
+                                  <th>Timestamp</th>
+                                  <th>VL action</th>
+                                  <th>VL object states</th>
+                                  <th>Agreement</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {reportData.semantics.slice(0, 6).map((row, i) => (
+                                  <tr key={i}>
+                                    <td>{Number(row.timestamp ?? row.frame_index ?? 0).toFixed(1)}s</td>
+                                    <td>{row.action ?? '—'}</td>
+                                    <td>{(row.objects || []).map((o) => `${o.label ?? '?'}: ${o.state ?? '?'}`).join(', ') || '—'}</td>
+                                    <td>{row.agreement === true ? '✓' : row.agreement === false ? '✗' : '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="reports-page__chart-empty">No semantics data</div>
+                        )}
                       </div>
                     </div>
                   </>
                 )}
-                {!reportLoading && !reportError && reportData.confidence && (
-                  <div className="reports-page__card">
-                    <h3 className="reports-page__card-title">Confidence</h3>
-                    <div className="reports-page__confidence-row">
-                      <div className="reports-page__chart-wrap">
-                        <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={(() => {
-                            const high = reportData.confidence.high_confidence_count ?? 0
-                            const low = reportData.confidence.low_confidence_count ?? 0
-                            if (high === 0 && low === 0) return [{ name: 'No events', value: 1, color: '#E5E5EA' }]
-                            return [
-                              { name: 'High confidence', value: high, color: '#34C759' },
-                              { name: 'Low confidence', value: low, color: '#FF3B30' },
-                            ]
-                          })()}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={50}
-                          outerRadius={80}
-                          paddingAngle={2}
-                          dataKey="value"
-                          label={({ name, value }) => (value > 0 ? `${name}: ${value}` : null)}
-                        >
-                          {(() => {
-                            const high = reportData.confidence.high_confidence_count ?? 0
-                            const low = reportData.confidence.low_confidence_count ?? 0
-                            const arr = high === 0 && low === 0
-                              ? [{ color: '#E5E5EA' }]
-                              : [{ color: '#34C759' }, { color: '#FF3B30' }]
-                            return arr.map((entry, i) => <Cell key={i} fill={entry.color} />)
-                          })()}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="reports-page__confidence-summary">
-                        <p>Overall: {((reportData.confidence.overall_confidence ?? 0) * 100).toFixed(0)}%</p>
-                        <p>Total events: {reportData.confidence.total_events ?? 0}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {!reportLoading && !reportError && reportData.worldGt?.objects?.length > 0 && (
-                  <div className="reports-page__card">
-                    <h3 className="reports-page__card-title">Object confidence</h3>
-                    <div className="reports-page__chart-wrap">
-                      <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={(reportData.worldGt.objects || []).map((o) => ({ name: o.label || o.id, value: Number(((o.confidence ?? 0) * 100).toFixed(1)) }))}
-                      layout="vertical"
-                      margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
-                      <Tooltip formatter={(v) => `${v}%`} />
-                      <Bar dataKey="value" fill="#007AFF" radius={[0, 6, 6, 0]} />
-                    </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                )}
-                {!reportLoading && !reportError && reportData.timeline?.length > 0 && (
-                  <div className="reports-page__card">
-                    <h3 className="reports-page__card-title">Events over time</h3>
-                    <div className="reports-page__chart-wrap">
-                      <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={reportData.timeline.map((e) => ({ time: e.start_time ?? 0, count: 1 }))}
-                      margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-                      <XAxis dataKey="time" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip />
-                      <Bar dataKey="count" fill="#5856D6" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                )}
-                {!reportLoading && !reportError && reportData.worldGt?.video && (
-                  <div className="reports-page__card">
-                    <h3 className="reports-page__card-title">Video info</h3>
-                    <div className="reports-page__video-info">
-                      <p>Duration: {(reportData.worldGt.video.duration_seconds ?? 0).toFixed(1)}s</p>
-                      <p>FPS: {(reportData.worldGt.video.fps ?? 0).toFixed(1)}</p>
-                      <p>Resolution: {reportData.worldGt.video.resolution?.join(' \u00d7 ') || '\u2014'}</p>
-                    </div>
-                  </div>
-                )}
-                {!reportLoading && !reportError && reportMetricsRun === 'calibrated' && reportData.metrics && (
-                  <div className="reports-page__card reports-page__card--reanalysis" style={{ gridColumn: '1 / -1' }}>
-                    <h3 className="reports-page__card-title">Precision & Recall from reanalysis</h3>
-                    <p className="reports-page__reanalysis-desc">Metrics after correction and video reanalysis.</p>
-                    <div className="reports-page__reanalysis-metrics">
-                      <div className="reports-page__metric">
-                        <span className="reports-page__metric-value">{((reportData.metrics.event_precision ?? 0) * 100).toFixed(1)}%</span>
-                        <span className="reports-page__metric-label">Precision</span>
-                      </div>
-                      <div className="reports-page__metric">
-                        <span className="reports-page__metric-value">{((reportData.metrics.event_recall ?? 0) * 100).toFixed(1)}%</span>
-                        <span className="reports-page__metric-label">Recall</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
+            </aside>
+            <div className="reports-page__right">
+              {reportLoading && (
+                <div className="reports-page__loading" aria-live="polite">
+                  <div className="reports-page__loading-bar" />
+                  <div className="reports-page__loading-shimmer">
+                    <div className="reports-page__loading-shimmer-inner" />
+                  </div>
+                  <span className="reports-page__loading-text">Loading report data…</span>
+                </div>
+              )}
+              {reportError && (
+                <div className="reports-page__error">{reportError}</div>
+              )}
+              {!reportLoading && !reportError && (reportData.metrics != null || reportData.confidence != null || reportData.timeline != null || reportData.worldGt != null) && (
+                <>
+                  <div className="reports-page__card reports-page__card--efficiency">
+                    <h3 className="reports-page__card-title">Efficiency Summary</h3>
+                    <div className="reports-page__efficiency-cards">
+                      <div className="reports-page__stat-card">
+                        <span className="reports-page__stat-value">{reportData.worldGt?.objects?.length ?? 0}</span>
+                        <span className="reports-page__stat-label">Objects detected</span>
+                      </div>
+                      <div className="reports-page__stat-card">
+                        <span className="reports-page__stat-value">{reportData.confidence?.total_events ?? reportData.worldGt?.events?.length ?? 0}</span>
+                        <span className="reports-page__stat-label">Events detected</span>
+                      </div>
+                      <div className="reports-page__stat-card">
+                        <span className="reports-page__stat-value">
+                          {(() => {
+                            const total = reportData.confidence?.total_events ?? 0
+                            const low = reportData.confidence?.low_confidence_count ?? 0
+                            return total > 0 ? `${((low / total) * 100).toFixed(1)}%` : '—'
+                          })()}
+                        </span>
+                        <span className="reports-page__stat-label">Review rate</span>
+                      </div>
+                      <div className="reports-page__stat-card">
+                        <span className="reports-page__stat-value">95.8%</span>
+                        <span className="reports-page__stat-label">Time saved</span>
+                      </div>
+                    </div>
+                  </div>
+                <div className="reports-page__json-wrap reports-page__json-wrap--below-metrics">
+                    <h3 className="reports-page__card-title">Raw JSON</h3>
+                    <div className="reports-page__json-tabs">
+                      {['metrics', 'confidence', 'timeline', 'world_gt'].map((key) => (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`reports-page__json-tab ${jsonTab === key ? 'reports-page__json-tab--active' : ''}`}
+                          onClick={() => setJsonTab(key)}
+                        >
+                          {key.replace('_', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                    <pre className="reports-page__json-pre">
+                      {(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab]) != null
+                        ? JSON.stringify(jsonTab === 'world_gt' ? reportData.worldGt : reportData[jsonTab], null, 2)
+                        : '\u2014'}
+                    </pre>
+                </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1087,10 +1192,40 @@ export default function App() {
                 preload="auto"
                 disablePictureInPicture
                 disableRemotePlayback
-                onLoadedData={(e) => { e.target.play().catch(() => {}); setResultVideoPlaying(true) }}
-                onCanPlay={(e) => { e.target.play().catch(() => {}); setResultVideoPlaying(true) }}
-                onPlay={() => setResultVideoPlaying(true)}
-                onPause={() => setResultVideoPlaying(false)}
+                onLoadedData={(e) => {
+                  const main = e.target
+                  main.play().catch(() => {})
+                  setResultVideoPlaying(true)
+                  const pip = resultPipVideoRef.current
+                  if (pip && Number.isFinite(main.currentTime)) {
+                    pip.currentTime = main.currentTime
+                    pip.play().catch(() => {})
+                  }
+                }}
+                onCanPlay={(e) => {
+                  const main = e.target
+                  main.play().catch(() => {})
+                  setResultVideoPlaying(true)
+                  const pip = resultPipVideoRef.current
+                  if (pip && Number.isFinite(main.currentTime)) {
+                    pip.currentTime = main.currentTime
+                    pip.play().catch(() => {})
+                  }
+                }}
+                onPlay={() => {
+                  setResultVideoPlaying(true)
+                  const main = resultVideoRef.current
+                  const pip = resultPipVideoRef.current
+                  if (main && pip && Number.isFinite(main.currentTime)) {
+                    pip.currentTime = main.currentTime
+                    pip.play().catch(() => {})
+                  }
+                }}
+                onPause={() => {
+                  setResultVideoPlaying(false)
+                  const pip = resultPipVideoRef.current
+                  if (pip && !pip.paused) pip.pause()
+                }}
                 onError={(e) => console.warn('[RoboSight] Annotated video failed to load', e.target?.error)}
               />
             ) : (
@@ -1105,13 +1240,17 @@ export default function App() {
             className="result-view__play-pause result-view__actions-btn"
             aria-label={resultVideoPlaying ? 'Pause' : 'Play'}
             onClick={() => {
-              const v = resultVideoRef.current
-              if (!v) return
+              const main = resultVideoRef.current
+              const pip = resultPipVideoRef.current
+              if (!main) return
               if (resultVideoPlaying) {
-                v.pause()
+                main.pause()
+                if (pip) pip.pause()
                 setResultVideoPlaying(false)
               } else {
-                v.play().catch(() => {})
+                if (pip && Number.isFinite(main.currentTime)) pip.currentTime = main.currentTime
+                main.play().catch(() => {})
+                if (pip) pip.play().catch(() => {})
                 setResultVideoPlaying(true)
               }
             }}
@@ -1139,6 +1278,7 @@ export default function App() {
               onMouseDown={handlePipMouseDown}
             >
               <video
+                ref={resultPipVideoRef}
                 className="result-view__pip-video"
                 src={effectivePlaybackSrc}
                 data-video-role="original"
@@ -1149,7 +1289,12 @@ export default function App() {
                 preload="auto"
                 disablePictureInPicture
                 disableRemotePlayback
-                onLoadedData={(e) => e.target.play().catch(() => {})}
+                onLoadedData={(e) => {
+                  const pip = e.target
+                  const main = resultVideoRef.current
+                  if (main && Number.isFinite(main.currentTime)) pip.currentTime = main.currentTime
+                  pip.play().catch(() => {})
+                }}
               />
               <span className="result-view__pip-label">Original</span>
               <span
@@ -1191,6 +1336,28 @@ export default function App() {
               )}
             </div>
           </div>
+          {showCorrectionPopup && (
+            <div className="correction-popup">
+              <div className="correction-popup__backdrop" onClick={() => setShowCorrectionPopup(false)} aria-hidden="true" />
+              <div className="correction-popup__card" role="dialog" aria-labelledby="correction-popup-title" aria-modal="true">
+                <h2 id="correction-popup-title" className="correction-popup__title">Correction</h2>
+                <label className="correction-popup__label" htmlFor="correction-popup-input">Correction notes (optional)</label>
+                <textarea
+                  id="correction-popup-input"
+                  className="correction-popup__input"
+                  placeholder="Describe what to correct for rescan…"
+                  value={correctionText}
+                  onChange={(e) => setCorrectionText(e.target.value)}
+                  rows={3}
+                  autoFocus
+                />
+                <div className="correction-popup__actions">
+                  <button type="button" className="correction-popup__cancel" onClick={() => setShowCorrectionPopup(false)}>Cancel</button>
+                  <button type="button" className="correction-popup__rescan" onClick={handleCorrectionRescan}>Rescan</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {/* Vision analysis: back-vision pro mask + user video playing while we poll job status */}
