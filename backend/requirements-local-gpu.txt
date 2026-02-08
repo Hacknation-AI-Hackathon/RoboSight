@@ -1,0 +1,21 @@
+# Local GPU requirements (RTX 5090 / NVIDIA GPU with CUDA)
+# Install ON TOP of base requirements.txt:
+#   pip install -r requirements.txt
+#   pip install -r requirements-local-gpu.txt
+
+# PyTorch with CUDA
+torch>=2.4.0
+torchvision>=0.19.0
+
+# HuggingFace Transformers (specific commit for SAM3 + LFM2.5-VL support)
+git+https://github.com/huggingface/transformers.git@2a5ba8b53d298ed8421e09831bf96bb6d056a24d
+
+# Model loading
+accelerate>=1.0.0
+
+# YOLO
+ultralytics>=8.3.0
+
+# Optional: vLLM for accelerated VL inference
+# Uncomment if using backend=local_vllm
+# vllm>=0.6.0

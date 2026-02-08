@@ -1,0 +1,128 @@
+{
+  "version": "0.1",
+  "description": "Object ontology for navigation-relevant ground truth generation",
+  "categories": {
+    "interactable": {
+      "description": "Objects a human can physically interact with to change state",
+      "examples": ["drawer", "door", "cabinet", "handle", "switch"]
+    },
+    "static": {
+      "description": "Objects that provide spatial context but do not change state",
+      "examples": ["table", "counter", "shelf", "wall"]
+    },
+    "structural": {
+      "description": "Environment boundaries relevant to navigation",
+      "examples": ["doorway", "passage", "obstacle"]
+    }
+  },
+  "object_types": {
+    "drawer": {
+      "category": "interactable",
+      "default_state": "closed",
+      "affordances": ["openable", "closable", "graspable", "pullable", "pushable"],
+      "possible_states": ["closed", "open", "partially_open"],
+      "detection_prompts": ["drawer"]
+    },
+    "door": {
+      "category": "interactable",
+      "default_state": "closed",
+      "affordances": ["openable", "closable", "pushable", "pullable", "traversable"],
+      "possible_states": ["closed", "open", "partially_open", "locked"],
+      "detection_prompts": ["door"]
+    },
+    "cabinet": {
+      "category": "interactable",
+      "default_state": "closed",
+      "affordances": ["openable", "closable", "graspable"],
+      "possible_states": ["closed", "open", "partially_open"],
+      "detection_prompts": ["cabinet", "cupboard"]
+    },
+    "handle": {
+      "category": "interactable",
+      "default_state": "visible",
+      "affordances": ["graspable", "pullable", "pushable", "turnable"],
+      "possible_states": ["visible", "grasped", "occluded"],
+      "detection_prompts": ["handle", "knob"]
+    },
+    "switch": {
+      "category": "interactable",
+      "default_state": "off",
+      "affordances": ["pressable", "toggleable"],
+      "possible_states": ["on", "off"],
+      "detection_prompts": ["switch", "button"]
+    }
+  },
+  "affordances": {
+    "openable": {"description": "Can be opened from a closed state"},
+    "closable": {"description": "Can be closed from an open state"},
+    "graspable": {"description": "Can be grasped by a human hand"},
+    "pullable": {"description": "Can be pulled toward the agent"},
+    "pushable": {"description": "Can be pushed away from the agent"},
+    "traversable": {"description": "Agent can pass through when open"},
+    "turnable": {"description": "Can be rotated"},
+    "pressable": {"description": "Can be pressed to activate"},
+    "toggleable": {"description": "Can be switched between two states"},
+    "movable": {"description": "Can be relocated in space"}
+  },
+  "state_transitions": {
+    "closed": {"allowed_next": ["open", "partially_open"], "requires_agent": true},
+    "open": {"allowed_next": ["closed", "partially_open"], "requires_agent": true},
+    "partially_open": {"allowed_next": ["open", "closed"], "requires_agent": true},
+    "locked": {"allowed_next": ["closed"], "requires_agent": true},
+    "visible": {"allowed_next": ["grasped", "occluded"], "requires_agent": false},
+    "grasped": {"allowed_next": ["visible"], "requires_agent": true},
+    "occluded": {"allowed_next": ["visible"], "requires_agent": false},
+    "on": {"allowed_next": ["off"], "requires_agent": true},
+    "off": {"allowed_next": ["on"], "requires_agent": true}
+  },
+  "action_types": {
+    "open_drawer": {
+      "object_types": ["drawer"],
+      "state_change": {"from": "closed", "to": "open"},
+      "requires_proximity": true,
+      "requires_motion": true
+    },
+    "close_drawer": {
+      "object_types": ["drawer"],
+      "state_change": {"from": "open", "to": "closed"},
+      "requires_proximity": true,
+      "requires_motion": true
+    },
+    "reach_into_drawer": {
+      "object_types": ["drawer"],
+      "state_change": null,
+      "requires_proximity": true,
+      "requires_motion": false
+    },
+    "open_door": {
+      "object_types": ["door"],
+      "state_change": {"from": "closed", "to": "open"},
+      "requires_proximity": true,
+      "requires_motion": true
+    },
+    "close_door": {
+      "object_types": ["door"],
+      "state_change": {"from": "open", "to": "closed"},
+      "requires_proximity": true,
+      "requires_motion": true
+    },
+    "open_cabinet": {
+      "object_types": ["cabinet"],
+      "state_change": {"from": "closed", "to": "open"},
+      "requires_proximity": true,
+      "requires_motion": true
+    },
+    "close_cabinet": {
+      "object_types": ["cabinet"],
+      "state_change": {"from": "open", "to": "closed"},
+      "requires_proximity": true,
+      "requires_motion": true
+    },
+    "grasp_handle": {
+      "object_types": ["handle"],
+      "state_change": {"from": "visible", "to": "grasped"},
+      "requires_proximity": true,
+      "requires_motion": false
+    }
+  }
+}
